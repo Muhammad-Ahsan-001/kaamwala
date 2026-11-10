@@ -2,7 +2,7 @@ import { Check, CircleCheck, Flag, Gavel } from "lucide-react";
 import { useMemo, useState } from "react";
 import { data, type AdminDispute, type Category } from "../../data";
 import { errorCode, errorText } from "../../data/errors";
-import { areaName, categoryName, personName } from "../../data/labels";
+import { areaName, categoryName, personName, savedChoice } from "../../data/labels";
 import { dateLabel } from "../../lib/dates";
 import { useData } from "../../lib/useData";
 import { useSettings } from "../../lib/settings";
@@ -106,7 +106,7 @@ function DisputeCard({ dispute, category, resolving, onResolve, onCancel, onDone
       <div className="mt-3 rounded-2xl bg-busy-50 px-3 py-2">
         <div className="text-sm font-bold text-busy-700">{t("شکایت", "Shikayat", "Complaint")}</div>
         <p dir="auto">
-          <Auto text={dispute.disputeReason ?? "—"} />
+          <Auto text={dispute.disputeReason ? savedChoice(dispute.disputeReason, t) : "—"} />
         </p>
       </div>
 

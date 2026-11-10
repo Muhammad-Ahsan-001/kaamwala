@@ -1,9 +1,9 @@
 import { Ban, Briefcase, Calendar, Check, CheckCheck, CircleCheck, Clock, ClipboardList, Flag, Frown, Hourglass, Info, LoaderCircle, MapPin, Meh, Mic, RotateCcw, Send, Smile, Sparkles, Star, Timer, UsersRound, Wallet, Wrench, X, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { data, type Category, type Job, type Message, type Offer } from "../data";
-import { errorCode, errorText } from "../data/errors";
-import { areaName, bestOfferId, categoryName, firstName, personName, phrase, rupees } from "../data/labels";
+import { data, type Category, type Crew, type Job, type Message, type Offer } from "../data";
+import { crewErrorText, errorCode, errorText } from "../data/errors";
+import { DISPUTE_REASONS, areaName, bestOfferId, categoryName, crewShare, firstName, personName, phrase, rupees } from "../data/labels";
 import { cue } from "../lib/audio";
 import { clockLabel, rangeLabel, today } from "../lib/dates";
 import { useSession } from "../lib/session";
@@ -191,7 +191,10 @@ function JobRow({ job, category, isCustomer }: { job: Job; category: Category | 
         <CategoryIcon name={category?.icon} className="h-6 w-6" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block font-bold">{categoryName(category, lang)}</span>
+        <span className="flex flex-wrap items-center gap-x-2 font-bold">
+          {categoryName(category, lang)}
+          {job.mode === "crew" && <Tag tone="plain">{t("ٹیم", "Crew", "Crew")}</Tag>}
+        </span>
         <OneLine text={job.description} className="text-sm text-soft" />
         <span className="block text-sm text-soft">
           <span className="latin">{job.durationDays}</span> {t("دن", "din", job.durationDays === 1 ? "day" : "days")}
@@ -285,16 +288,14 @@ export function MyJobs() {
   );
 }
 
-function CrewOfferLine({ crewId }: { crewId: string }) {
+function CrewOfferLine({ crew }: { crew: Crew }) {
   const { t, lang } = useSettings();
-  const crew = useData(() => data.getCrew(crewId), [crewId]);
-  if (!crew.data) return null;
   return (
-    <Link to={`/app/crews/${crewId}`} className="mt-1 flex min-h-12 items-center gap-2 rounded-2xl bg-amber-50 px-3 font-semibold text-amber-800">
+    <Link to={`/app/crews/${crew.id}`} className="mt-1 flex min-h-12 items-center gap-2 rounded-2xl bg-amber-50 px-3 font-semibold text-amber-800">
       <UsersRound className="h-5 w-5 shrink-0" aria-hidden />
-      <OneLine text={personName(crew.data.name, lang)} className="min-w-0 flex-1" />
+      <OneLine text={personName(crew.name, lang)} className="min-w-0 flex-1" />
       <span className="shrink-0 text-sm">
-        <span className="latin">{crew.data.members.length}</span> {t("لوگ", "log", "people")}
+        <span className="latin">{crew.members.length}</span> {t("لوگ", "log", "people")}
       </span>
     </Link>
   );
@@ -302,7 +303,11 @@ function CrewOfferLine({ crewId }: { crewId: string }) {
 
 function OfferCard({ offer, job, best, accepting, onAccept }: { offer: Offer; job: Job; best: boolean; accepting: string | null; onAccept: () => void }) {
   const { t, lang } = useSettings();
-  const stillFree = offer.worker.status === "available";
+  const crewMembers = useRef<string[]>([]);
+  const crew = useData(() => (offer.crewId ? data.getCrew(offer.crewId) : Promise.resolve(null)), [offer.crewId], { reloadOn: ["worker.status"], when: (e) => e.type === "worker.status" && (crewMembers.current.length === 0 || crewMembers.current.includes(e.workerId)) });
+  crewMembers.current = crew.data?.members.map((member) => member.id) ?? [];
+  // A crew's offer needs everyone in it free, not only the leader who sent it.
+  const stillFree = crew.data ? crew.data.available : offer.worker.status === "available";
   return (
     <Card className={cx("p-3", best && "border-2 border-brand-600")}>
       <div className="flex items-center gap-3">
@@ -333,10 +338,10 @@ function OfferCard({ offer, job, best, accepting, onAccept }: { offer: Offer; jo
           <div className="text-sm text-soft">/ {t("دن", "din", "day")}</div>
         </div>
       </div>
-      {offer.crewId && <CrewOfferLine crewId={offer.crewId} />}
+      {crew.data && <CrewOfferLine crew={crew.data} />}
       {job.durationDays > 1 && <PriceMath perDay={offer.price} days={job.durationDays} className="mt-1 text-sm" />}
       <Button size="md" variant={best ? "primary" : "secondary"} className="mt-2 w-full" icon={accepting === offer.id ? undefined : Check} disabled={accepting !== null || !stillFree} onClick={onAccept}>
-        {accepting === offer.id ? <Spinner /> : stillFree ? t("قبول", "Qubool", "Accept") : t("اب فارغ نہیں", "Ab farigh nahi", "No longer free")}
+        {accepting === offer.id ? <Spinner /> : stillFree ? t("قبول", "Qubool", "Accept") : crew.data ? t("ٹیم کا کوئی فرد مصروف ہے", "Crew ka koi fard masroof hai", "Someone in this crew is busy") : t("اب فارغ نہیں", "Ab farigh nahi", "No longer free")}
       </Button>
     </Card>
   );
@@ -374,7 +379,7 @@ function CustomerOffers({ job, categories }: { job: Job; categories: Category[] 
       cue("success", audioCues);
       navigate(`/app/jobs/${id}`, { replace: true });
     } catch (err) {
-      setError(errorText(err, t));
+      setError(job.mode === "crew" ? crewErrorText(err, t) : errorText(err, t));
       offers.reload();
     } finally {
       setAccepting(null);
@@ -595,13 +600,6 @@ function ConfirmSheet({ title, body, confirm, working, onClose, onConfirm }: { t
   );
 }
 
-const DISPUTE_REASONS = [
-  { ur: "کام پورا نہیں ہوا", roman: "Kaam poora nahi hua", en: "The work was not finished" },
-  { ur: "پیسوں کا مسئلہ", roman: "Paison ka masla", en: "A problem with payment" },
-  { ur: "برا رویہ", roman: "Bura rawaiya", en: "Bad behaviour" },
-  { ur: "نہیں آیا", roman: "Nahi aaya", en: "They did not come" },
-];
-
 function DisputeSheet({ working, underway, onClose, onSend }: { working: boolean; underway: boolean; onClose: () => void; onSend: (reason: string) => void }) {
   const { t } = useSettings();
   const [reason, setReason] = useState("");
@@ -753,8 +751,10 @@ export function JobChat() {
   const isParty = isCustomer || isAssigned;
   /** Crew members follow their leader; only the leader and the customer decide. */
   const isFollower = Boolean(!isCustomer && job?.crewId && crew.data && crew.data.leaderId !== user?.workerId);
-  const crewReady = !job?.crewId || crew.data !== null || crew.error !== null;
-  const canDecide = isParty && crewReady && !isFollower;
+  const leadsThisCrew = Boolean(job?.crewId && crew.data && crew.data.leaderId === user?.workerId);
+  // Fails closed: on a crew job a worker only gets the buttons once we know he leads it, because the server will insist.
+  const canDecide = isParty && (isCustomer || !job?.crewId || leadsThisCrew);
+  const crewUnknown = Boolean(isAssigned && job?.crewId && !crew.data && crew.error);
 
   const canChat = isParty;
   const thread = useData(() => (canChat ? data.listMessages(id) : Promise.resolve<Message[]>([])), [id, canChat], {
@@ -871,7 +871,7 @@ export function JobChat() {
       setCurrent(updated);
       return updated;
     } catch (err) {
-      setError(errorText(err, t));
+      setError(job?.crewId ? crewErrorText(err, t) : errorText(err, t));
       // The refusal usually means the job moved on. CARD_OUTDATED also removed the card, so a new one can be made.
       loaded.reload();
       return null;
@@ -961,6 +961,8 @@ export function JobChat() {
   const perDay = job ? (job.agreedPrice ?? job.proposedPrice ?? job.floor) : 0;
   const doneDays = job?.days.filter((d) => d.status === "completed").length ?? 0;
   const nextDay = job?.days.find((d) => d.status === "scheduled");
+  const crewJob = Boolean(job?.crewId);
+  const myShare = job && crewJob && isAssigned ? crewShare(perDay, job.workerIds.length, leadsThisCrew) : null;
   const iConfirmed = job ? (isCustomer ? job.customerConfirmed : job.workerConfirmed) : false;
   const otherConfirmed = job ? (isCustomer ? job.workerConfirmed : job.customerConfirmed) : false;
   const canCancel = canDecide && (status === "negotiating" || status === "pending_confirmation" || (status === "requested" && isCustomer) || (engaged && doneDays === 0));
@@ -1052,7 +1054,7 @@ export function JobChat() {
                     {t("جواب کا انتظار ہے۔ 30 منٹ میں جواب نہ آیا تو درخواست ختم ہو جائے گی۔", "Jawab ka intezar hai. 30 minute mein jawab na aaya to darkhwast khatam ho jayegi.", "Waiting for an answer. The request ends if nobody replies in 30 minutes.")}
                   </Banner>
                 ) : canDecide ? (
-                  <Banner icon={Briefcase}>{t("نئی درخواست آئی ہے، قبول کریں یا انکار", "Nayi darkhwast aayi hai, qubool karein ya inkar", "A new request. Accept or decline")}</Banner>
+                  <Banner icon={Briefcase}>{crewJob ? t("ٹیم کے لیے نئی درخواست۔ لیڈر کے طور پر قبول کریں یا انکار", "Crew ke liye nayi darkhwast. Leader ke taur par qubool karein ya inkar", "A new request for your crew. As leader, accept or decline") : t("نئی درخواست آئی ہے، قبول کریں یا انکار", "Nayi darkhwast aayi hai, qubool karein ya inkar", "A new request. Accept or decline")}</Banner>
                 ) : (
                   <Banner tone="plain" icon={UsersRound}>
                     {t("ٹیم کے لیے درخواست، لیڈر فیصلہ کرے گا", "Crew ke liye darkhwast, leader faisla karega", "A request for your crew. The leader decides")}
@@ -1064,10 +1066,32 @@ export function JobChat() {
                 </Banner>
               )}
 
+              {crewUnknown && (
+                <>
+                  <Banner tone="amber" icon={Info}>{t("ٹیم کی تفصیل نہیں مل سکی، اس لیے ابھی فیصلے کے بٹن نہیں دکھا رہے", "Crew ki tafseel nahi mil saki, is liye abhi faisle ke button nahi dikha rahe", "Could not load the crew, so the decision buttons are hidden for now")}</Banner>
+                  <Button variant="secondary" size="md" icon={RotateCcw} className="w-full" onClick={crew.reload}>
+                    {t("دوبارہ کوشش کریں", "Dobara koshish karein", "Try again")}
+                  </Button>
+                </>
+              )}
+
               {engaged && (
                 <>
-                  <Banner icon={CircleCheck}>{t("بکنگ پکی، کام ختم ہونے تک کاریگر مصروف ہے", "Booking pakki, kaam khatam hone tak kaarigar masroof hai", "Booked. The worker is busy until the job ends")}</Banner>
+                  <Banner icon={CircleCheck}>{crewJob ? t("بکنگ پکی، کام ختم ہونے تک پوری ٹیم مصروف ہے", "Booking pakki, kaam khatam hone tak poori crew masroof hai", "Booked. The whole crew is busy until the job ends") : t("بکنگ پکی، کام ختم ہونے تک کاریگر مصروف ہے", "Booking pakki, kaam khatam hone tak kaarigar masroof hai", "Booked. The worker is busy until the job ends")}</Banner>
                   {multi && <DayProgress days={value.days} />}
+                  {myShare !== null && (
+                    <p className="flex items-center justify-between gap-2 rounded-2xl bg-brand-50 px-3 py-2 font-semibold text-brand-800">
+                      <span>{t("آپ کا حصہ", "Aapka hissa", "Your share")}</span>
+                      <span>
+                        <span className="latin font-extrabold">{rupees(myShare)}</span> / {t("دن", "din", "day")}
+                      </span>
+                    </p>
+                  )}
+                  {isFollower && (
+                    <Banner tone="amber" icon={UsersRound}>
+                      {multi ? t("روزانہ کا کام ٹیم لیڈر مکمل کرے گا۔ آپ کو کچھ نہیں دبانا۔", "Rozana ka kaam crew leader mukammal karega. Aap ko kuch nahi dabana.", "Your crew leader marks each day as done. There is nothing for you to press.") : t("کام مکمل ٹیم لیڈر کرے گا۔ آپ کو کچھ نہیں دبانا۔", "Kaam mukammal crew leader karega. Aap ko kuch nahi dabana.", "Your crew leader marks the job as finished. There is nothing for you to press.")}
+                    </Banner>
+                  )}
                   {multi && doneDays > 0 && (
                     <Card className="p-3">
                       <p className="text-center text-sm text-soft">{t("اب تک مکمل", "Ab tak mukammal", "Completed so far")}</p>
@@ -1089,7 +1113,7 @@ export function JobChat() {
                       )}
                     </Button>
                   )}
-                  {isCustomer && multi && <p className="text-center text-sm text-soft">{t("کاریگر ہر دن کا کام مکمل کرتا ہے", "Kaarigar har din ka kaam mukammal karta hai", "The worker marks each day as done")}</p>}
+                  {isCustomer && multi && <p className="text-center text-sm text-soft">{crewJob ? t("ٹیم لیڈر ہر دن کا کام مکمل کرتا ہے", "Crew leader har din ka kaam mukammal karta hai", "The crew leader marks each day as done") : t("کاریگر ہر دن کا کام مکمل کرتا ہے", "Kaarigar har din ka kaam mukammal karta hai", "The worker marks each day as done")}</p>}
                 </>
               )}
 
@@ -1101,6 +1125,11 @@ export function JobChat() {
                   {multi && doneDays < value.durationDays && (
                     <p className="mt-1 text-sm font-semibold text-amber-700">
                       {t(`جلدی ختم ہوا: ${value.durationDays} میں سے ${doneDays} دن مکمل۔ صرف انہی کے پیسے لگے۔`, `Jaldi khatam hua: ${value.durationDays} mein se ${doneDays} din mukammal. Sirf unhi ke paise lage.`, `Finished early: ${doneDays} of ${value.durationDays} days done. Only those days were charged.`)}
+                    </p>
+                  )}
+                  {myShare !== null && value.agreedPrice !== null && (
+                    <p className="mt-1 rounded-2xl bg-brand-50 px-3 py-2 font-semibold text-brand-800">
+                      {t("آپ کا حصہ", "Aapka hissa", "Your share")}: <span className="latin font-extrabold">{rupees(myShare * (multi ? doneDays : 1))}</span>
                     </p>
                   )}
                 </Card>
@@ -1125,7 +1154,7 @@ export function JobChat() {
                   />
                 ) : (
                   <Card className="p-3 text-center">
-                    <p className="text-sm text-soft">{t("فی دن قیمت", "Fi din qeemat", "Price per day")}</p>
+                    <p className="text-sm text-soft">{crewJob ? t("پوری ٹیم، فی دن", "Poori crew, fi din", "Whole crew, per day") : t("فی دن قیمت", "Fi din qeemat", "Price per day")}</p>
                     <p className="latin text-3xl font-extrabold">{rupees(perDay)}</p>
                     {multi && <PriceMath perDay={perDay} days={value.durationDays} className="mt-1 text-sm" />}
                   </Card>
@@ -1169,11 +1198,11 @@ export function JobChat() {
                         </div>
                         <div className={cx("flex min-h-12 items-center justify-center gap-1 rounded-2xl px-2 font-semibold", iConfirmed ? "bg-brand-100 text-brand-700" : "bg-sunken text-soft")}>
                           {iConfirmed ? <Check className="h-4 w-4 shrink-0" aria-hidden /> : <Hourglass className="h-4 w-4 shrink-0" aria-hidden />}
-                          {t("آپ", "Aap", "You")}
+                          {isFollower ? t("لیڈر", "Leader", "Leader") : t("آپ", "Aap", "You")}
                         </div>
                       </div>
                       <div className="mt-2">
-                        <BusyNotice />
+                        <BusyNotice crew={crewJob} />
                       </div>
                       {canDecide && (
                         <Button size="xl" icon={busy === "confirm" ? undefined : iConfirmed ? Hourglass : CircleCheck} className="mt-2 w-full" disabled={busy !== null || iConfirmed} onClick={() => void run("confirm", () => data.confirmJob(id))}>
@@ -1276,7 +1305,7 @@ export function JobChat() {
         <Sheet title={t("جلدی ختم کریں؟", "Jaldi khatam karein?", "Finish early?")} onClose={() => setSheet(null)}>
           <div className="flex gap-2 rounded-2xl bg-sunken p-3">
             <Info className="mt-1 h-5 w-5 shrink-0 text-brand-600" aria-hidden />
-            <p>{t("صرف مکمل دنوں کے پیسے لگیں گے۔ باقی دن منسوخ ہو جائیں گے اور کاریگر فارغ ہو جائے گا۔", "Sirf mukammal dinon ke paise lagenge. Baqi din mansookh ho jayenge aur kaarigar farigh ho jayega.", "Only completed days are charged. The remaining days are cancelled and the worker becomes free.")}</p>
+            <p>{crewJob ? t("صرف مکمل دنوں کے پیسے لگیں گے۔ باقی دن منسوخ ہو جائیں گے اور پوری ٹیم فارغ ہو جائے گی۔", "Sirf mukammal dinon ke paise lagenge. Baqi din mansookh ho jayenge aur poori crew farigh ho jayegi.", "Only completed days are charged. The remaining days are cancelled and the whole crew becomes free.") : t("صرف مکمل دنوں کے پیسے لگیں گے۔ باقی دن منسوخ ہو جائیں گے اور کاریگر فارغ ہو جائے گا۔", "Sirf mukammal dinon ke paise lagenge. Baqi din mansookh ho jayenge aur kaarigar farigh ho jayega.", "Only completed days are charged. The remaining days are cancelled and the worker becomes free.")}</p>
           </div>
           <div className="mt-3">
             <PriceMath perDay={perDay} days={doneDays} className="text-lg" />
@@ -1295,7 +1324,7 @@ export function JobChat() {
       {sheet === "cancel" && (
         <ConfirmSheet
           title={t("کام منسوخ کریں؟", "Kaam mansookh karein?", "Cancel this job?")}
-          body={engaged ? t("بکنگ ختم ہو جائے گی اور کاریگر فارغ ہو جائے گا۔ کوئی پیسے نہیں لگیں گے۔", "Booking khatam ho jayegi aur kaarigar farigh ho jayega. Koi paise nahi lagenge.", "The booking ends and the worker becomes free. Nothing is charged.") : t("بات چیت ختم ہو جائے گی۔", "Baat cheet khatam ho jayegi.", "The conversation will end.")}
+          body={engaged ? (crewJob ? t("بکنگ ختم ہو جائے گی اور پوری ٹیم فارغ ہو جائے گی۔ کوئی پیسے نہیں لگیں گے۔", "Booking khatam ho jayegi aur poori crew farigh ho jayegi. Koi paise nahi lagenge.", "The booking ends and the whole crew becomes free. Nothing is charged.") : t("بکنگ ختم ہو جائے گی اور کاریگر فارغ ہو جائے گا۔ کوئی پیسے نہیں لگیں گے۔", "Booking khatam ho jayegi aur kaarigar farigh ho jayega. Koi paise nahi lagenge.", "The booking ends and the worker becomes free. Nothing is charged.")) : t("بات چیت ختم ہو جائے گی۔", "Baat cheet khatam ho jayegi.", "The conversation will end.")}
           confirm={t("منسوخ کریں", "Mansookh karein", "Cancel job")}
           working={busy === "cancel"}
           onClose={() => setSheet(null)}
@@ -1304,7 +1333,7 @@ export function JobChat() {
       )}
 
       {sheet === "decline" && (
-        <ConfirmSheet title={t("انکار کریں؟", "Inkar karein?", "Decline this request?")} body={t("گاہک کو بتا دیا جائے گا اور آپ پھر فارغ ہو جائیں گے۔", "Gahak ko bata diya jayega aur aap phir farigh ho jayenge.", "The customer will be told and you become free again.")} confirm={t("انکار", "Inkar", "Decline")} working={busy === "decline"} onClose={() => setSheet(null)} onConfirm={() => void decline()} />
+        <ConfirmSheet title={t("انکار کریں؟", "Inkar karein?", "Decline this request?")} body={crewJob ? t("گاہک کو بتا دیا جائے گا اور پوری ٹیم پھر فارغ ہو جائے گی۔", "Gahak ko bata diya jayega aur poori crew phir farigh ho jayegi.", "The customer will be told and the whole crew becomes free again.") : t("گاہک کو بتا دیا جائے گا اور آپ پھر فارغ ہو جائیں گے۔", "Gahak ko bata diya jayega aur aap phir farigh ho jayenge.", "The customer will be told and you become free again.")} confirm={t("انکار", "Inkar", "Decline")} working={busy === "decline"} onClose={() => setSheet(null)} onConfirm={() => void decline()} />
       )}
 
       {sheet === "dispute" && <DisputeSheet underway={engaged} working={busy === "dispute"} onClose={() => setSheet(null)} onSend={(reason) => void dispute(reason)} />}
@@ -1515,7 +1544,7 @@ export function VoiceReview() {
                   {otherName && (
                     <>
                       {" · "}
-                      <Auto text={firstName(otherName, lang)} />
+                      <Auto text={crewId && !asWorker ? personName(otherName, lang) : firstName(otherName, lang)} />
                     </>
                   )}
                   {value.totalPrice !== null && (
@@ -1602,7 +1631,7 @@ export function VoiceReview() {
 
                   {otherName && (
                     <p className="rounded-2xl bg-amber-50 p-3 text-sm text-amber-800">
-                      {t(`${firstName(otherName, lang)} بھی آپ کو ریٹ کرے گا۔ اچھے گاہک کو کاریگر جلدی جواب دیتے ہیں۔`, `${firstName(otherName, lang)} bhi aap ko rate karega. Achhe customer ko kaarigar jaldi jawab dete hain.`, `${firstName(otherName, lang)} will rate you too. Workers reply faster to good customers.`)}
+                      {crewId ? t("ٹیم لیڈر بھی آپ کو ریٹ کرے گا۔ اچھے گاہک کو کاریگر جلدی جواب دیتے ہیں۔", "Crew leader bhi aap ko rate karega. Achhe customer ko kaarigar jaldi jawab dete hain.", "The crew leader will rate you too. Workers reply faster to good customers.") : t(`${firstName(otherName, lang)} بھی آپ کو ریٹ کرے گا۔ اچھے گاہک کو کاریگر جلدی جواب دیتے ہیں۔`, `${firstName(otherName, lang)} bhi aap ko rate karega. Achhe customer ko kaarigar jaldi jawab dete hain.`, `${firstName(otherName, lang)} will rate you too. Workers reply faster to good customers.`)}
                     </p>
                   )}
                 </>

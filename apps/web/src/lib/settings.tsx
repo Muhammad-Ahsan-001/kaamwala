@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { data } from "../data";
+import { rememberNames } from "../data/labels";
 
 export type Lang = "ur" | "roman" | "en";
 
@@ -40,10 +41,24 @@ function write(key: string, value: string) {
   }
 }
 
-function storedLang(): Lang {
+/** What this person chose, or null if they never have. */
+function savedLang(): Lang | null {
   const value = read("kw.lang");
-  return value === "en" || value === "roman" ? value : "ur";
+  return value === "ur" || value === "roman" || value === "en" ? value : null;
 }
+
+function storedLang(): Lang {
+  return savedLang() ?? "ur";
+}
+
+function applyLang(lang: Lang) {
+  document.documentElement.lang = lang === "ur" ? "ur" : lang === "roman" ? "ur-Latn" : "en";
+  document.documentElement.dir = lang === "ur" ? "rtl" : "ltr";
+  document.title = lang === "ur" ? "کام والا · KaamWala" : "KaamWala";
+}
+
+// index.html ships as Urdu and right to left. Correct it before React draws anything.
+applyLang(storedLang());
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(storedLang);
@@ -53,12 +68,50 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [onActiveJob, setOnActiveJob] = useState(false);
   const [screenHeld, setScreenHeld] = useState(false);
   const wakeLock = useRef<WakeLockSentinel | null>(null);
+  const urduNames = useRef(false);
+  const [namesLoaded, setNamesLoaded] = useState(false);
   const wakeLockSupported = typeof navigator !== "undefined" && "wakeLock" in navigator;
   const wantScreenOn = keepAwake && onActiveJob && wakeLockSupported;
 
+  // Before paint, so the text and its direction always change together.
+  useLayoutEffect(() => applyLang(lang), [lang]);
+
+  // Keep every open tab on the same language. A phone can freeze a background tab and a
+  // restored page was not running, so both miss the event and look again when they come back.
   useEffect(() => {
-    document.documentElement.lang = lang === "ur" ? "ur" : lang === "roman" ? "ur-Latn" : "en";
-    document.documentElement.dir = lang === "ur" ? "rtl" : "ltr";
+    const sync = () => {
+      const saved = savedLang();
+      if (saved) setLangState(saved);
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "kw.lang" || event.key === null) sync();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") sync();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("pageshow", sync);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("pageshow", sync);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
+  // Urdu area and skill names come from the API. Once they arrive every screen draws again with them.
+  useEffect(() => {
+    if (lang !== "ur" || urduNames.current) return;
+    urduNames.current = true;
+    Promise.all([data.getAreas(), data.listCategories()]).then(
+      ([areas, categories]) => {
+        rememberNames(areas, categories);
+        setNamesLoaded(true);
+      },
+      () => {
+        urduNames.current = false;
+      },
+    );
   }, [lang]);
 
   useEffect(() => {
@@ -172,7 +225,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       screenHeld,
       t: (ur, roman, en) => (lang === "ur" ? ur : lang === "roman" ? roman : en),
     }),
-    [lang, setLang, sunlight, setSunlight, audioCues, setAudioCues, keepAwake, setKeepAwake, wakeLockSupported, onActiveJob, screenHeld],
+    // namesLoaded is not read here: a new value is what makes every screen draw the names.
+    [lang, namesLoaded, setLang, sunlight, setSunlight, audioCues, setAudioCues, keepAwake, setKeepAwake, wakeLockSupported, onActiveJob, screenHeld],
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

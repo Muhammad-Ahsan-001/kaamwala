@@ -289,8 +289,8 @@ export function AdminCategories() {
 
   const names = (category: Category) => (
     <>
-      <span className="block break-words font-bold">{categoryName(category, lang)}</span>
-      <span className="block break-words text-sm text-soft">
+      <span className="block font-bold [overflow-wrap:anywhere]">{categoryName(category, lang)}</span>
+      <span className="block text-sm text-soft [overflow-wrap:anywhere]">
         <span className={lang === "ur" ? "latin" : "ur"}>{lang === "ur" ? category.nameEn : category.nameUr}</span>
         {lang === "ur" ? <span className="latin"> · {category.nameRoman}</span> : lang === "roman" ? <span className="latin"> · {category.nameEn}</span> : <span className="latin"> · {category.nameRoman}</span>}
       </span>
@@ -328,7 +328,7 @@ export function AdminCategories() {
             ) : (
               <>
                 {/* Phones: a stacked row each. */}
-                <Card className="divide-y divide-line overflow-hidden p-0 lg:hidden">
+                <Card className="divide-y divide-line overflow-hidden p-0 xl:hidden">
                   {order.map((category, index) => (
                     <div key={category.id} className={cx("p-3", !category.active && "bg-sunken/60")}>
                       <div className="flex items-center gap-3">
@@ -355,10 +355,10 @@ export function AdminCategories() {
                 </Card>
 
                 {/* Wide screens: a real table. */}
-                <Card className="hidden overflow-hidden p-0 lg:block">
+                <Card className="hidden overflow-x-auto p-0 xl:block">
                   <table className="w-full border-collapse text-start">
                     <thead>
-                      <tr className="border-b border-line text-sm font-bold text-soft">
+                      <tr className="whitespace-nowrap border-b border-line text-sm font-bold text-soft">
                         <th className="w-28 px-3 py-2 text-start font-bold">{t("ترتیب", "Tarteeb", "Order")}</th>
                         <th className="px-3 py-2 text-start font-bold">{t("شعبہ", "Shoba", "Trade")}</th>
                         <th className="px-3 py-2 text-start font-bold">{t("کم از کم", "Kam az kam", "Floor")}</th>
@@ -382,13 +382,13 @@ export function AdminCategories() {
                               {!category.active && <Tag tone="plain">{t("بند", "Band", "Disabled")}</Tag>}
                             </div>
                           </td>
-                          <td className="px-3 py-1 font-bold">
+                          <td className="whitespace-nowrap px-3 py-1 font-bold">
                             <Money value={category.floorPrice} />
                           </td>
-                          <td className="px-3 py-1">
+                          <td className="whitespace-nowrap px-3 py-1">
                             <Latin>± {category.step}</Latin>
                           </td>
-                          <td className="px-3 py-1 text-soft">
+                          <td className="whitespace-nowrap px-3 py-1 text-soft">
                             <Latin>{category.keywords.length} / {category.skills.length}</Latin>
                           </td>
                           <td className="px-3 py-1">

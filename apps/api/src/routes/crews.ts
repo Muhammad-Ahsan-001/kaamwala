@@ -47,6 +47,22 @@ function notifyInvited(userIds: string[], crew: { id: string; name: string }): v
   }).catch(() => undefined);
 }
 
+/** Someone joined, said no or left. The crew's open screens refresh and the leader, who is not watching, is told. */
+async function tellCrew(crewId: string, title: string, who: string | null): Promise<void> {
+  const crew = await prisma.crew.findUnique({
+    where: { id: crewId },
+    select: { name: true, leader: { select: { userId: true } }, members: { where: { status: "accepted" }, select: { worker: { select: { userId: true } } } } },
+  });
+  if (!crew) return;
+  hub.toUsersOnly([crew.leader.userId, ...crew.members.map((m) => m.worker.userId)], { type: "crew.updated", crewId });
+  void pushToUsers([crew.leader.userId], {
+    title,
+    body: who ? `${who}: ${crew.name}` : crew.name,
+    url: `/app/crews/${crewId}`,
+    tag: `${crewId}-members`,
+  }).catch(() => undefined);
+}
+
 export async function crewRoutes(app: FastifyInstance) {
   app.get("/crews", async (req) => {
     const { categoryId } = z.object({ categoryId: z.string().optional() }).parse(req.query);
@@ -153,6 +169,7 @@ export async function crewRoutes(app: FastifyInstance) {
       });
       if (updated.count === 0) throw notFound("Invitation");
     });
+    await tellCrew(id, "ٹیم میں نیا ساتھی شامل ہوا", authOf(req).user.name);
     return oneCrew(id);
   });
 
@@ -164,6 +181,7 @@ export async function crewRoutes(app: FastifyInstance) {
       where: { crewId: id, workerId: worker.id, status: "invited" },
     });
     if (removed.count === 0) throw notFound("Invitation");
+    await tellCrew(id, "دعوت قبول نہیں ہوئی", authOf(req).user.name);
     return { ok: true };
   });
 
@@ -179,6 +197,7 @@ export async function crewRoutes(app: FastifyInstance) {
       const removed = await tx.crewMember.deleteMany({ where: { crewId: id, workerId: worker.id } });
       if (removed.count === 0) throw notFound("Membership");
     });
+    await tellCrew(id, "ساتھی نے ٹیم چھوڑ دی", authOf(req).user.name);
     return { ok: true };
   });
 }

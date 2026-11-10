@@ -58,6 +58,12 @@ async function workerUserIds(tx: Tx, ids: string[]): Promise<string[]> {
   return rows.map((r) => r.userId);
 }
 
+/** The rest of a crew, who hear what their leader decided for them. Empty on a solo job. */
+async function crewmatesOf(tx: Tx, job: JobFull, userId: string): Promise<string[]> {
+  if (!job.crew) return [];
+  return (await workerUserIds(tx, activeWorkerIds(job))).filter((id) => id !== userId);
+}
+
 const jobUrl = (id: string) => `/app/jobs/${id}`;
 
 const WRONG_TRADE = "This work is not in the trades they do.";
@@ -427,7 +433,7 @@ export async function acceptOffer(auth: AuthContext, jobId: string, offerId: str
     fx.jobClosed(jobId);
     fx.offer(offer.id, "offer.updated");
     fx.push(await workerUserIds(tx, workerIds), {
-      title: "آپ کی پیشکش قبول ہو گئی",
+      title: offer.crewId ? "ٹیم کی پیشکش قبول ہو گئی" : "آپ کی پیشکش قبول ہو گئی",
       body: `Rs ${offer.price}`,
       url: jobUrl(jobId),
       tag: jobId,
@@ -478,6 +484,12 @@ export async function workerDecline(auth: AuthContext, jobId: string): Promise<J
     fx.push([locked.customerId], {
       title: "کاریگر دستیاب نہیں",
       body: "کوئی اور کاریگر چنیں",
+      url: jobUrl(jobId),
+      tag: jobId,
+    });
+    fx.push(await crewmatesOf(tx, locked, auth.user.id), {
+      title: "لیڈر نے درخواست سے انکار کر دیا",
+      body: "آپ پھر فارغ ہیں",
       url: jobUrl(jobId),
       tag: jobId,
     });
@@ -794,7 +806,9 @@ export async function cancelJob(auth: AuthContext, jobId: string): Promise<JobDt
     }
     const updated = await cancelInTx(tx, fx, locked);
     const others =
-      side === "customer" ? await workerUserIds(tx, activeWorkerIds(locked)) : [locked.customerId];
+      side === "customer"
+        ? await workerUserIds(tx, activeWorkerIds(locked))
+        : [locked.customerId, ...(await crewmatesOf(tx, locked, auth.user.id))];
     fx.push(others, { title: "کام منسوخ ہو گیا", body: locked.area, url: jobUrl(jobId), tag: jobId });
     return updated;
   });

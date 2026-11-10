@@ -123,10 +123,19 @@ const MESSAGES: Partial<Record<ApiErrorCode, Words>> = {
   WORKER_NOT_APPROVED: ["آپ کی پروفائل منظوری کے انتظار میں ہے", "Aapki profile manzoori ke intezar mein hai", "Your profile is waiting for approval"],
   WORKER_NOT_AVAILABLE: ["یہ کاریگر اب فارغ نہیں رہا", "Ye kaarigar ab farigh nahi raha", "This worker is no longer available"],
   WRONG_TRADE: ["یہ کام ان کے ہنر میں نہیں", "Ye kaam in ke hunar mein nahi", "This work is not in the trades they do"],
+  CREW_REQUIRED: ["اس کام پر صرف ٹیم آفر دے سکتی ہے", "Is kaam par sirf crew offer de sakti hai", "Only a crew can bid on this job"],
+  FORBIDDEN: ["یہ آپ نہیں کر سکتے", "Ye aap nahi kar sakte", "You are not allowed to do this"],
+  INVALID_JOB_STATE: ["یہ کام آگے بڑھ چکا ہے، تازہ حالت دیکھیں", "Ye kaam aage barh chuka hai, taza haalat dekhein", "This job has moved on. Please see its latest status."],
 };
 
 /** The message for a failure, in the current language. Pass the `t` from useSettings. */
 export function errorText(error: unknown, t: Translate): string {
   const words = MESSAGES[errorCode(error)] ?? AGAIN;
   return t(words[0], words[1], words[2]);
+}
+
+/** One busy person holds up a whole crew, so on a crew booking the refusal says that, not "this worker". */
+export function crewErrorText(error: unknown, t: Translate): string {
+  if (errorCode(error) === "WORKER_NOT_AVAILABLE") return t("ٹیم کا کوئی فرد اب فارغ نہیں، اس لیے یہ ٹیم ابھی نہیں بلائی جا سکتی", "Crew ka koi fard ab farigh nahi, is liye ye crew abhi nahi bulai ja sakti", "Someone in this crew is no longer free, so the crew cannot be booked right now");
+  return errorText(error, t);
 }

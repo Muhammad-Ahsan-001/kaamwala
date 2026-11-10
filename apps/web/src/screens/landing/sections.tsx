@@ -20,9 +20,9 @@ const LANG_OPTIONS: { value: Lang; label: string; className: string }[] = [
 const WRAP = "mx-auto w-full max-w-6xl px-4 lg:px-8";
 
 function LangSwitch() {
-  const { lang, setLang } = useSettings();
+  const { lang, setLang, t } = useSettings();
   return (
-    <div className="flex shrink-0 rounded-2xl bg-sunken" role="group" aria-label="Language">
+    <div className="flex shrink-0 rounded-2xl bg-sunken" role="group" aria-label={t("زبان", "Zaban", "Language")}>
       {LANG_OPTIONS.map((option) => (
         <button
           key={option.value}

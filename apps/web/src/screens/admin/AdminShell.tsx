@@ -8,7 +8,7 @@ import { useSession } from "../../lib/session";
 import { useSettings } from "../../lib/settings";
 import { Logo } from "../../ui/Logo";
 import { IconButton, cx } from "../../ui/primitives";
-import { LangCycle } from "../../ui/shell";
+import { LangPicker } from "../../ui/shell";
 import type { Words } from "./parts";
 
 type Tab = Words & { to: string; end?: boolean; icon: LucideIcon; shortEn?: string; count?: "pendingWorkers" | "disputes" };
@@ -123,10 +123,10 @@ export function AdminShell({ title, subtitle, back, action, children }: { title:
       {/* Phone header */}
       <header className="sticky top-0 z-[500] flex min-h-14 items-center gap-1 border-b border-line bg-surface px-3 md:hidden">
         <Logo size={36} wordmark={false} />
-        <span className="latin ms-1 rounded-full bg-sunken px-2.5 py-0.5 text-xs font-bold text-soft">Admin</span>
+        <span className="ms-1 rounded-full bg-sunken px-2.5 py-0.5 text-xs font-bold text-soft">{t("ایڈمن", "Admin", "Admin")}</span>
         <span className="flex-1" />
         <LiveState />
-        <LangCycle />
+        <LangPicker />
         <IconButton icon={LogOut} label={signOutLabel} onClick={signOut} />
       </header>
 
@@ -134,7 +134,7 @@ export function AdminShell({ title, subtitle, back, action, children }: { title:
       <aside className="sticky top-0 hidden h-dvh flex-col border-e border-line bg-surface md:flex">
         <div className="flex min-h-20 items-center justify-between gap-2 px-4">
           <Logo size={36} stacked={false} />
-          <span className="latin rounded-full bg-sunken px-2.5 py-0.5 text-xs font-bold text-soft">Admin</span>
+          <span className="rounded-full bg-sunken px-2.5 py-0.5 text-xs font-bold text-soft">{t("ایڈمن", "Admin", "Admin")}</span>
         </div>
         <nav className="flex flex-col gap-1 px-2" aria-label={t("ایڈمن", "Admin", "Admin")}>
           {TABS.map((tab) => (
@@ -144,7 +144,7 @@ export function AdminShell({ title, subtitle, back, action, children }: { title:
         <div className="mt-auto flex items-center gap-1 border-t border-line p-2">
           <LiveState />
           <span className="flex-1" />
-          <LangCycle />
+          <LangPicker />
           <IconButton icon={LogOut} label={signOutLabel} onClick={signOut} />
         </div>
       </aside>

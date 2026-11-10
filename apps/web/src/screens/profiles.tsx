@@ -1,9 +1,9 @@
-import { BadgeCheck, Clock3, FileUp, LoaderCircle, MapPin, PhoneCall, ScanSearch, Send, Settings as SettingsIcon, UserX } from "lucide-react";
+import { BadgeCheck, Clock3, FileUp, LoaderCircle, MapPin, PhoneCall, ScanSearch, Send, Settings as SettingsIcon, UserX, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { data, type Category, type ReviewView, type WorkerCard, type WorkerStatus } from "../data";
 import { errorText } from "../data/errors";
-import { areaName, categoryName, firstName, personName, phrase, rupees } from "../data/labels";
+import { areaName, categoryName, firstName, personName, phrase, rupees, savedChoice } from "../data/labels";
 import { useData } from "../lib/useData";
 import { useSession } from "../lib/session";
 import { useSettings } from "../lib/settings";
@@ -287,6 +287,13 @@ export function WorkerProfile() {
                 </Link>
               )}
 
+              {own && (
+                <Link to="/app/crews" className="mt-2 flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-line bg-surface px-3 font-bold text-ink">
+                  <UsersRound className="h-5 w-5 shrink-0 text-brand-600" aria-hidden />
+                  {t("میری ٹیم: بنائیں یا دیکھیں", "Meri crew: banayein ya dekhein", "My crew: create or view")}
+                </Link>
+              )}
+
               <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-2xl bg-sunken px-4 py-2">
                 <p className="font-bold">
                   <span className="latin">{rupees(value.rate)}</span> / {t("دن", "din", "day")}
@@ -294,7 +301,7 @@ export function WorkerProfile() {
                 {value.workingHours && (
                   <p className="flex min-w-0 items-center gap-1 text-sm text-soft">
                     <Clock3 className="h-4 w-4 shrink-0" aria-hidden />
-                    <Auto text={value.workingHours} />
+                    <Auto text={savedChoice(value.workingHours, t)} />
                   </p>
                 )}
               </div>

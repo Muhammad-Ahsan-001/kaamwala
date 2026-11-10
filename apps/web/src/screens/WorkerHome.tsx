@@ -3,12 +3,13 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { data, type Category, type Crew, type CrewInvite, type Job, type JobFeedItem, type LatLng, type OfflinePreset, type Offer, type WorkerCard, type WorkerSelf } from "../data";
 import { errorCode, errorText } from "../data/errors";
-import { areaName, categoryName, firstName, isLatin, personName, rupees } from "../data/labels";
+import { areaName, categoryName, crewShare, firstName, isLatin, personName, rupees } from "../data/labels";
 import { cue, speakUrdu } from "../lib/audio";
 import { LogoutButton } from "../ui/LogoutButton";
 import { clockLabel, dateLabel, isoDate, rangeLabel } from "../lib/dates";
 import { staleSince } from "../lib/offline";
 import { useConnection, useData } from "../lib/useData";
+import { useSyncState } from "../pwa/queue";
 import { useSettings, type Lang } from "../lib/settings";
 import { ErrorState } from "../ui/async";
 import { CategoryIcon } from "../ui/CategoryIcon";
@@ -17,7 +18,7 @@ import { DayProgress, PriceMath } from "../ui/hire";
 import { Avatar } from "../ui/people";
 import { PriceCard } from "../ui/PriceCard";
 import { Auto, Button, Card, Chip, EmptyState, InlineError, ListSkeleton, Rating, SectionTitle, Sheet, Skeleton, Switch, Tag, cx } from "../ui/primitives";
-import { LangCycle, ReadAloud, Screen } from "../ui/shell";
+import { LangPicker, ReadAloud, Screen } from "../ui/shell";
 import { Asked } from "../ui/QuestionVoice";
 
 type Translate = (ur: string, roman: string, en: string) => string;
@@ -210,6 +211,7 @@ function StatusCard({ me, chosen, notice, error, onFlip, onPreset, onLockedTap }
 function LiveBadge() {
   const { t } = useSettings();
   const state = useConnection();
+  const sync = useSyncState();
   if (state === "live") {
     return (
       <Tag>
@@ -218,7 +220,9 @@ function LiveBadge() {
       </Tag>
     );
   }
-  return <Tag tone="plain">{state === "offline" ? t("انٹرنیٹ نہیں", "Internet nahi", "No internet") : t("جوڑ رہے ہیں…", "Jor rahe hain…", "Connecting…")}</Tag>;
+  // The banner at the top of the screen already says there is no connection.
+  if (state === "offline" || !sync.online || !sync.reachable) return null;
+  return <Tag tone="plain">{t("جوڑ رہے ہیں…", "Jor rahe hain…", "Connecting…")}</Tag>;
 }
 
 function SpeakButton({ text }: { text: string }) {
@@ -335,7 +339,7 @@ function RequestCard({ job, category, area, km, speech, canAnswer, working, erro
       <JobFacts area={area} km={km} days={job.durationDays} startDate={job.startDate}>
         <Fact icon={Wallet}>
           <PerDayAmount amount={perDay} />
-          <span className="text-sm text-soft"> · {t("گاہک کی پیشکش", "Customer ki offer", "Customer's offer")}</span>
+          <span className="text-sm text-soft"> · {job.crewId ? t("پوری ٹیم کے لیے", "poori crew ke liye", "for the whole crew") : t("گاہک کی پیشکش", "Customer ki offer", "Customer's offer")}</span>
         </Fact>
       </JobFacts>
       {job.durationDays > 1 && <PriceMath perDay={perDay} days={job.durationDays} className="mt-1 text-sm" />}
@@ -493,7 +497,14 @@ function ActiveJob({ job, category, area, canComplete, earnedSoFar, working, err
         </Fact>
         <Fact icon={Wallet}>
           <PerDayAmount amount={perDay} />
+          {job.crewId && <span className="text-sm text-soft"> · {t("پوری ٹیم کا", "poori crew ka", "for the whole crew")}</span>}
         </Fact>
+        {job.crewId && canComplete !== null && (
+          <Fact icon={Users}>
+            <span className="text-sm text-soft">{t("آپ کا حصہ", "Aapka hissa", "Your share")}: </span>
+            <PerDayAmount amount={crewShare(perDay, job.workerIds.length, canComplete)} />
+          </Fact>
+        )}
       </div>
 
       {doneDays > 0 && multi && (
@@ -511,6 +522,30 @@ function ActiveJob({ job, category, area, canComplete, earnedSoFar, working, err
         </div>
       )}
     </section>
+  );
+}
+
+/** A worker's way into crews, always on the home screen. With no crew yet it opens the create form directly. */
+function CrewShortcut({ crews, invites }: { crews: Crew[] | null; invites: number }) {
+  const { t, lang } = useSettings();
+  const count = crews?.length ?? 0;
+  const names = crews?.map((crew) => personName(crew.name, lang)).join("، ") ?? "";
+  return (
+    <Link to={count > 0 ? "/app/crews" : "/app/crews?new=1"} className="mt-3 flex min-h-16 items-center gap-3 rounded-3xl border border-line bg-surface p-3 transition active:scale-[0.99]">
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-800">
+        <UsersRound className="h-6 w-6" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-bold">{count > 0 ? t("میری ٹیم", "Meri crew", "My crew") : t("ٹیم بنائیں", "Crew banayein", "Create a crew")}</span>
+        <span className="block truncate text-sm text-soft">{count > 0 ? <Auto text={names} /> : t("ساتھیوں کو فون نمبر سے بلائیں", "Saathiyon ko phone number se bulayein", "Invite the people you work with by phone")}</span>
+      </span>
+      {invites > 0 && (
+        <Tag tone="busy">
+          <span className="latin">{invites}</span> {t("دعوت", "dawat", invites === 1 ? "invite" : "invites")}
+        </Tag>
+      )}
+      <ChevronLeft className="h-5 w-5 shrink-0 text-faint ltr:rotate-180" aria-hidden />
+    </Link>
   );
 }
 
@@ -733,7 +768,7 @@ export function WorkerHome() {
   const mine = useData(() => data.listMyJobs(), [], { reloadOn: ["job.updated", "offer.updated"] });
   const feed = useData(() => data.listOpenJobs(), [], { reloadOn: ["job.updated", "job.closed", "offer.updated"] });
   const invites = useData(() => data.listCrewInvites(), [], { reloadOn: ["crew.invited"] });
-  const crews = useData(() => data.listMyCrews(), [], { reloadOn: ["crew.invited"] });
+  const crews = useData(() => data.listMyCrews(), [], { reloadOn: ["crew.invited", "crew.updated"] });
   const earnings = useData(() => data.getEarnings(), [], {
     reloadOn: ["job.updated"],
     when: (event) => event.type === "job.updated" && workerId !== null && event.job.workerIds.includes(workerId),
@@ -1046,6 +1081,8 @@ export function WorkerHome() {
     setOfferCrewId(crew?.id ?? null);
     setOfferError(null);
     setOfferJob(job);
+    // Whether everyone is free right now decides if a crew can bid at all.
+    if (job.mode === "crew") crews.reload();
   };
 
   const sendOffer = async () => {
@@ -1074,6 +1111,7 @@ export function WorkerHome() {
   const feedIsEmpty = feedShown && feed.data !== null && visibleJobs.length === 0;
   const feedControl = me && <JobFeedButton worker={me} categories={allCategories} disabled={!categories.data} onClick={() => setChoosingFeed(true)} />;
   const offerCrews = offerJob?.mode === "crew" ? ledCrewsFor(offerJob.categoryId) : [];
+  const offerCrewBusy = offerCrews.find((crew) => crew.id === offerCrewId)?.available === false;
   const earningsValue = earnings.data;
   const nextDay = active?.days.find((day) => day.status === "scheduled") ?? null;
   const perDay = active ? (active.agreedPrice ?? active.proposedPrice ?? active.floor) : 0;
@@ -1093,7 +1131,7 @@ export function WorkerHome() {
             <p className="truncate text-lg font-bold">{me ? <Auto text={firstName(me.name, lang)} /> : ""}</p>
           </div>
           <ReadAloud text={spokenStatus} />
-          <LangCycle />
+          <LangPicker />
           <Link to="/app/settings" aria-label={t("ترتیبات", "Settings", "Settings")} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-soft hover:bg-sunken">
             <SettingsIcon className="h-6 w-6" aria-hidden />
           </Link>
@@ -1171,6 +1209,8 @@ export function WorkerHome() {
           </section>
         )}
 
+        <CrewShortcut crews={crews.data} invites={invites.data?.length ?? 0} />
+
         <section>
           <SectionTitle action={<LiveBadge />}>{t("قریب کے نئے کام", "Qareeb ke naye kaam", "New jobs nearby")}</SectionTitle>
           {feedControl && !feedIsEmpty && <div className="mb-3">{feedControl}</div>}
@@ -1232,7 +1272,7 @@ export function WorkerHome() {
             setConfirmBusy(null);
           }}
         >
-          <p className="rounded-2xl bg-busy-50 p-3 font-semibold text-busy-700">{t("آپ کی جاری درخواست ختم ہو جائے گی اور گاہک کو بتا دیا جائے گا۔", "Aapki jari darkhwast khatam ho jayegi aur customer ko bata diya jayega.", "Your current request will end and the customer will be told.")}</p>
+          <p className="rounded-2xl bg-busy-50 p-3 font-semibold text-busy-700">{[...requests, ...deals].some((job) => job.crewId) ? t("پوری ٹیم کی جاری درخواست ختم ہو جائے گی، سب فارغ ہو جائیں گے اور گاہک کو بتا دیا جائے گا۔", "Poori crew ki jari darkhwast khatam ho jayegi, sab farigh ho jayenge aur customer ko bata diya jayega.", "The whole crew's request will end, everyone becomes free and the customer will be told.") : t("آپ کی جاری درخواست ختم ہو جائے گی اور گاہک کو بتا دیا جائے گا۔", "Aapki jari darkhwast khatam ho jayegi aur customer ko bata diya jayega.", "Your current request will end and the customer will be told.")}</p>
         </ConfirmSheet>
       )}
 
@@ -1286,12 +1326,13 @@ export function WorkerHome() {
             days={offerJob.durationDays}
             onStep={(direction) => setOfferPrice((price) => Math.max(offerJob.floor, price + (direction === "up" ? offerJob.step : -offerJob.step)))}
           />
+          {offerCrewBusy && <p className="mt-2 rounded-2xl bg-amber-50 p-3 font-semibold text-amber-800">{t("ٹیم کا کوئی فرد مصروف ہے۔ سب فارغ ہوں تو آفر جا سکتی ہے۔", "Crew ka koi fard masroof hai. Sab farigh hon to offer ja sakti hai.", "Someone in your crew is busy. The offer can go once everyone is free.")}</p>}
           {offerError && (
             <div className="mt-2">
               <InlineError>{offerError}</InlineError>
             </div>
           )}
-          <Button className="mt-3 w-full" size="xl" icon={Send} disabled={sending} onClick={() => void sendOffer()}>
+          <Button className="mt-3 w-full" size="xl" icon={Send} disabled={sending || offerCrewBusy} onClick={() => void sendOffer()}>
             {myOffers.data?.get(offerJob.id) ? t("نئی قیمت بھیجیں", "Nayi qeemat bhejein", "Send new price") : t("آفر بھیجیں", "Offer bhejein", "Send offer")}
           </Button>
         </Sheet>

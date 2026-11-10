@@ -23,7 +23,7 @@ function RoleCard({ to, icon: Icon, ur, roman, en, tone }: { to: string; icon: L
       </span>
       <span className="min-w-0 flex-1" dir={urdu ? "rtl" : "ltr"}>
         <span className={cx("block text-2xl font-bold", urdu ? "ur" : "latin")}>{lang === "ur" ? ur : lang === "roman" ? roman : en}</span>
-        <span className={cx("block text-sm text-soft", urdu ? "latin" : "ur")}>{urdu ? en : ur}</span>
+        {urdu && <span className="latin block text-sm text-soft">{roman}</span>}
       </span>
     </Link>
   );

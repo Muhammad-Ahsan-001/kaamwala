@@ -12,7 +12,7 @@ import { AreaSheet, placeName, useJobPlace } from "../ui/hire";
 import { WorkerRow } from "../ui/people";
 import { Button, Chip, EmptyState, LinkButton, ListSkeleton, Skeleton, cx } from "../ui/primitives";
 import { LogoutButton } from "../ui/LogoutButton";
-import { LangCycle, Screen } from "../ui/shell";
+import { LangPicker, Screen } from "../ui/shell";
 import { WorkersMap } from "../ui/WorkersMap";
 
 const RADII = [3, 5, 10];
@@ -261,7 +261,7 @@ export function Adda() {
         </div>
 
         <div className="absolute right-3 top-[72px] z-[400] flex flex-col rounded-2xl bg-surface shadow-card">
-          <LangCycle />
+          <LangPicker />
           <LogoutButton labeled />
         </div>
 
@@ -282,8 +282,8 @@ export function Adda() {
             <h1 className="min-w-0 truncate text-lg">{t("قریب کے کاریگر", "Qareeb ke kaarigar", "Workers nearby")}</h1>
             <div className="flex shrink-0 gap-1" role="group" aria-label={t("فاصلہ", "Faasla", "Distance")}>
               {RADII.map((km) => (
-                <button key={km} dir="ltr" type="button" aria-pressed={radiusKm === km} onClick={() => setRadiusKm(km)} className={cx("latin h-12 min-w-12 rounded-2xl px-2 text-sm font-bold transition active:scale-95", radiusKm === km ? "bg-brand-600 text-white" : "bg-sunken text-soft")}>
-                  {km} km
+                <button key={km} type="button" aria-pressed={radiusKm === km} onClick={() => setRadiusKm(km)} className={cx("h-12 min-w-12 rounded-2xl px-2 text-sm font-bold transition active:scale-95", radiusKm === km ? "bg-brand-600 text-white" : "bg-sunken text-soft")}>
+                  <span className="latin">{km}</span> {t("کلومیٹر", "km", "km")}
                 </button>
               ))}
             </div>
@@ -317,7 +317,7 @@ export function Adda() {
                     <EmptyState icon={SearchX} title={t("ابھی اس علاقے میں کوئی فارغ نہیں", "Abhi is ilaqay mein koi farigh nahi", "Nobody is available here right now")} body={nextRadius ? t("فاصلہ بڑھا کر دیکھیں", "Faasla barha kar dekhein", "Try a wider distance") : t("دوسرا علاقہ چنیں یا کام پوسٹ کریں", "Doosra ilaqa chunein ya kaam post karein", "Choose another area or post the job")} />
                     {nextRadius && (
                       <Button variant="secondary" size="md" className="w-full" onClick={() => setRadiusKm(nextRadius)}>
-                        <span className="latin">{nextRadius} km</span> {t("تک دیکھیں", "tak dekhein", "radius")}
+                        <span className="latin">{nextRadius}</span> {t("کلومیٹر تک دیکھیں", "km tak dekhein", "km radius")}
                       </Button>
                     )}
                     {postLink}

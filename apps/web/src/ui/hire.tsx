@@ -317,12 +317,12 @@ export function PriceMath({ perDay, days, className }: { perDay: number; days: n
   );
 }
 
-export function BusyNotice() {
+export function BusyNotice({ crew = false }: { crew?: boolean }) {
   const { t } = useSettings();
   return (
     <p className="flex items-center gap-2 rounded-2xl bg-brand-50 px-3 py-2 text-sm font-semibold text-brand-800">
       <Lock className="h-4 w-4 shrink-0" aria-hidden />
-      {t("بکنگ پکی ہونے سے کام ختم ہونے تک کاریگر مصروف رہے گا۔", "Booking pakki hone se kaam khatam hone tak kaarigar masroof rahega.", "The worker stays busy from confirmation until the job ends.")}
+      {crew ? t("بکنگ پکی ہونے سے کام ختم ہونے تک پوری ٹیم مصروف رہے گی۔", "Booking pakki hone se kaam khatam hone tak poori crew masroof rahegi.", "The whole crew stays busy from confirmation until the job ends.") : t("بکنگ پکی ہونے سے کام ختم ہونے تک کاریگر مصروف رہے گا۔", "Booking pakki hone se kaam khatam hone tak kaarigar masroof rahega.", "The worker stays busy from confirmation until the job ends.")}
     </p>
   );
 }

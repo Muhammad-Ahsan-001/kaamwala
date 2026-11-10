@@ -1,11 +1,12 @@
-import { Briefcase, ChevronRight, House, Map as MapIcon, MessageCircleQuestion, User, Volume2, Wallet, type LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { Briefcase, Check, ChevronRight, House, Languages, Map as MapIcon, MessageCircleQuestion, User, Volume2, Wallet, type LucideIcon } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, useLocation, useNavigationType } from "react-router-dom";
 import { speakUrdu } from "../lib/audio";
 import { parentOf, useGoBack } from "../lib/back";
 import { useSession } from "../lib/session";
 import { useSettings, type Lang } from "../lib/settings";
-import { cx } from "./primitives";
+import { Sheet, cx } from "./primitives";
 
 const LANGS: { value: Lang; label: string; className: string }[] = [
   { value: "ur", label: "اردو", className: "ur" },
@@ -15,9 +16,9 @@ const LANGS: { value: Lang; label: string; className: string }[] = [
 
 /** The full language choice, for the welcome and settings screens. */
 export function LangPills({ className }: { className?: string }) {
-  const { lang, setLang } = useSettings();
+  const { lang, setLang, t } = useSettings();
   return (
-    <div className={cx("flex flex-wrap justify-center gap-2", className)} role="group" aria-label="Language">
+    <div className={cx("flex flex-wrap justify-center gap-2", className)} role="group" aria-label={t("زبان", "Zaban", "Language")}>
       {LANGS.map((option) => (
         <button
           key={option.value}
@@ -33,19 +34,70 @@ export function LangPills({ className }: { className?: string }) {
   );
 }
 
-/** One tap to the next language, on every screen. */
-export function LangCycle() {
-  const { lang, setLang } = useSettings();
-  const next: Record<Lang, { to: Lang; label: string; className: string }> = {
-    ur: { to: "roman", label: "Ro", className: "latin" },
-    roman: { to: "en", label: "EN", className: "latin" },
-    en: { to: "ur", label: "اردو", className: "ur text-sm" },
-  };
-  const entry = next[lang];
+const SHORT_NAME: Record<Lang, { label: string; className: string }> = {
+  ur: { label: "اردو", className: "ur text-xs" },
+  roman: { label: "Roman", className: "latin text-xs" },
+  en: { label: "EN", className: "latin text-xs" },
+};
+
+/** Shows the language in use. Changing it takes a second, deliberate tap, so a stray touch on a header can never switch the app. */
+export function LangPicker() {
+  const { lang, setLang, t } = useSettings();
+  const [open, setOpen] = useState(false);
+  const title = t("زبان چنیں", "Zaban chunein", "Choose language");
+  const current = SHORT_NAME[lang];
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
   return (
-    <button type="button" onClick={() => setLang(entry.to)} aria-label="Change language" className={cx("h-12 min-w-12 shrink-0 rounded-2xl px-2 font-bold text-soft hover:bg-sunken", entry.className)}>
-      {entry.label}
-    </button>
+    <>
+      <button
+        type="button"
+        data-lang-picker
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={t("زبان بدلیں", "Zaban badlein", "Change language")}
+        onClick={() => setOpen(true)}
+        className="flex h-12 min-w-12 shrink-0 flex-col items-center justify-center rounded-2xl px-1 font-bold text-soft hover:bg-sunken"
+      >
+        <Languages className="h-4 w-4" aria-hidden />
+        <span className={current.className} style={{ lineHeight: 1.25 }}>
+          {current.label}
+        </span>
+      </button>
+      {/* In the body, because a header with a blur would otherwise trap the sheet inside itself. */}
+      {open &&
+        createPortal(
+          <Sheet title={title} onClose={() => setOpen(false)}>
+            <div className="space-y-2" role="group" aria-label={title}>
+              {LANGS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  data-lang-option={option.value}
+                  aria-pressed={lang === option.value}
+                  onClick={() => {
+                    setLang(option.value);
+                    setOpen(false);
+                  }}
+                  className={cx("flex min-h-14 w-full items-center justify-between gap-3 rounded-2xl border-2 px-4 text-lg font-bold transition active:scale-[0.99]", lang === option.value ? "border-brand-600 bg-brand-50" : "border-line bg-surface")}
+                >
+                  <span className={option.className}>{option.label}</span>
+                  {lang === option.value && <Check className="h-6 w-6 shrink-0 text-brand-600" strokeWidth={3} aria-hidden />}
+                </button>
+              ))}
+            </div>
+          </Sheet>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -63,18 +115,20 @@ export function ReadAloud({ text }: { text: string }) {
   );
 }
 
-/** Heading in Urdu with a helper line, matching the worker screens in the design. */
+/** The heading in the chosen language. Urdu keeps its Roman helper line, which is the same language in the other script. */
 export function Headline({ ur, roman, en, size = "3xl" }: { ur: string; roman: string; en: string; size?: "2xl" | "3xl" | "4xl" }) {
-  const { lang } = useSettings();
-  const english = lang === "en";
+  const { lang, t } = useSettings();
+  const urdu = lang === "ur";
   return (
     <div>
-      <h1 dir={english ? "ltr" : "rtl"} className={cx(english ? "latin font-extrabold" : "ur", `text-${size}`)}>
-        {english ? en : ur}
+      <h1 dir={urdu ? "rtl" : "ltr"} className={cx(urdu ? "ur" : "latin font-extrabold", `text-${size}`)}>
+        {t(ur, roman, en)}
       </h1>
-      <p dir={english ? "rtl" : "ltr"} className={cx("text-soft", english ? "ur" : "latin", lang === "ur" && "text-right")}>
-        {english ? ur : roman}
-      </p>
+      {urdu && (
+        <p dir="ltr" className="latin text-right text-soft">
+          {roman}
+        </p>
+      )}
     </div>
   );
 }
@@ -180,7 +234,7 @@ export function Screen({
           {steps ? <StepDots {...steps} /> : <h1 className="min-w-0 flex-1 truncate text-xl">{title}</h1>}
           {right}
           {speak && <ReadAloud text={speak} />}
-          <LangCycle />
+          <LangPicker />
         </header>
       )}
       <main className={cx("flex-1", !bare && "px-4 pb-6", navigationType === "POP" ? "animate-page-back" : "animate-page-in")}>{children}</main>

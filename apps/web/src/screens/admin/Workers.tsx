@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { data, type AdminWorkerRow, type Category } from "../../data";
 import { errorText } from "../../data/errors";
-import { areaName, categoryName, personName, phrase, rupees } from "../../data/labels";
+import { areaName, categoryName, personName, phrase, rupees, savedChoice } from "../../data/labels";
 import { useData } from "../../lib/useData";
 import { useSettings } from "../../lib/settings";
 import { digitsOnly } from "../../lib/validate";
@@ -87,7 +87,7 @@ function WorkerDetail({ worker, trades, busy, onAct, onClose }: { worker: AdminW
             { label: t("ریٹ فی دن", "Rate fi din", "Rate per day"), value: worker.rate ? <Latin>{rupees(worker.rate)}</Latin> : "—" },
             { label: t("مکمل کام", "Mukammal kaam", "Jobs done"), value: <Latin>{worker.trust.jobCount}</Latin> },
             { label: t("ریٹنگ", "Rating", "Rating"), value: worker.trust.ratingCount > 0 ? <Rating value={worker.trust.rating} count={worker.trust.ratingCount} /> : t("ابھی نہیں", "Abhi nahi", "None yet") },
-            { label: t("اوقات", "Auqaat", "Working hours"), value: worker.workingHours ? <Auto text={worker.workingHours} /> : "—" },
+            { label: t("اوقات", "Auqaat", "Working hours"), value: worker.workingHours ? <Auto text={savedChoice(worker.workingHours, t)} /> : "—" },
             { label: t("جواب کی شرح", "Jawab ki sharah", "Response rate"), value: <Latin>{Math.round(worker.trust.responseRate * 100)}%</Latin> },
           ]}
         />

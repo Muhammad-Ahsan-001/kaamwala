@@ -68,8 +68,8 @@ export function WorkerRow({ worker, highlighted, hireQuery = "" }: { worker: Wor
           <span className="latin font-bold text-ink">{rupees(worker.rate)}</span>
           {worker.trust.ratingCount > 0 ? <Rating value={worker.trust.rating} count={worker.trust.ratingCount} /> : <Tag tone="plain">{t("نیا", "Naya", "New")}</Tag>}
           {worker.distanceKm !== undefined && (
-            <span dir="ltr" className="latin">
-              {worker.distanceKm < 0.1 ? "<0.1" : worker.distanceKm} km
+            <span>
+              <bdi className="latin">{worker.distanceKm < 0.1 ? "<0.1" : worker.distanceKm}</bdi> {t("کلومیٹر", "km", "km")}
             </span>
           )}
         </div>

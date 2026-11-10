@@ -21,6 +21,7 @@ const EVENT_TYPES = new Set<string>([
   "message.transcribed",
   "categories.changed",
   "crew.invited",
+  "crew.updated",
   "job.closed",
 ] satisfies WsEventType[]);
 

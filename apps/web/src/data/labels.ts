@@ -1,5 +1,5 @@
 import type { Lang } from "../lib/settings";
-import type { AppSettings, Category, Offer, WorkerCard } from "./types";
+import type { AppSettings, Area, Category, Offer, WorkerCard } from "./types";
 
 /** Display labels for common Roman Urdu tags and skills. Unknown text is shown as it is. */
 const PHRASES: Record<string, { ur: string; en: string }> = {
@@ -20,6 +20,10 @@ const PHRASES: Record<string, { ur: string; en: string }> = {
   "acha rawaiya": { ur: "اچھا رویہ", en: "Good behaviour" },
   "bura rawaiya": { ur: "برا رویہ", en: "Poor behaviour" },
   "izzat se pesh aaye": { ur: "عزت سے پیش آئے", en: "Respectful" },
+  "tameez daar": { ur: "تمیز دار", en: "Polite" },
+  mahir: { ur: "ماہر", en: "Skilled" },
+  "jaldi kaam": { ur: "جلدی کام", en: "Quick work" },
+  "bharosay ka aadmi": { ur: "بھروسے کا آدمی", en: "Trustworthy" },
   "pankha theek karna": { ur: "پنکھا ٹھیک کرنا", en: "Fan repair" },
   wiring: { ur: "وائرنگ", en: "Wiring" },
   "switch board": { ur: "سوئچ بورڈ", en: "Switch board" },
@@ -51,10 +55,60 @@ const PHRASES: Record<string, { ur: string; en: string }> = {
   "khana banana": { ur: "کھانا بنانا", en: "Cooking" },
 };
 
+/** A category skill's own Urdu word and each area's Urdu name, from the API. See rememberNames. */
+const skillUrdu = new Map<string, string>();
+const areaUrdu = new Map<string, string>();
+
+/** Keeps the names only the API knows, so a screen can show them without loading the lists itself. */
+export function rememberNames(areas: Area[], categories: Category[]): void {
+  for (const area of areas) areaUrdu.set(area.name, area.nameUr);
+  for (const category of categories) {
+    for (const skill of category.skills) {
+      const word = category.skillAliases?.[skill]?.find((alias) => !isLatin(alias));
+      if (word) skillUrdu.set(skill, word);
+    }
+  }
+}
+
 export function phrase(text: string, lang: Lang): string {
-  const entry = PHRASES[text];
-  if (!entry || lang === "roman") return text;
-  return lang === "ur" ? entry.ur : entry.en;
+  const entry = PHRASES[text] ?? PHRASES[text.trim().toLowerCase()];
+  if (lang === "roman") return text;
+  if (lang === "en") return entry?.en ?? text;
+  return entry?.ur ?? skillUrdu.get(text) ?? text;
+}
+
+type Words = { ur: string; roman: string; en: string };
+type Translate = (ur: string, roman: string, en: string) => string;
+
+/** Tapping one of these saves the words in whatever language the person was using. */
+export const HOUR_PRESETS: Words[] = [
+  { ur: "صبح 9 سے شام 6", roman: "Subah 9 se sham 6", en: "9 am to 6 pm" },
+  { ur: "سارا دن", roman: "Saara din", en: "All day" },
+  { ur: "صرف شام کو", roman: "Sirf sham ko", en: "Evenings only" },
+];
+
+export const DISPUTE_REASONS: Words[] = [
+  { ur: "کام پورا نہیں ہوا", roman: "Kaam poora nahi hua", en: "The work was not finished" },
+  { ur: "پیسوں کا مسئلہ", roman: "Paison ka masla", en: "A problem with payment" },
+  { ur: "برا رویہ", roman: "Bura rawaiya", en: "Bad behaviour" },
+  { ur: "نہیں آیا", roman: "Nahi aaya", en: "They did not come" },
+];
+
+const SAVED_CHOICES: Words[] = [
+  ...HOUR_PRESETS,
+  ...DISPUTE_REASONS,
+  // Other wordings of working hours that are already on profiles.
+  { ur: "صبح 9 سے شام 6", roman: "Subah 9 se shaam 6", en: "9 am to 6 pm" },
+  { ur: "صبح 8 سے دوپہر 2", roman: "Subah 8 se dopahar 2", en: "8 am to 2 pm" },
+  { ur: "دوپہر 12 سے رات 8", roman: "Dopahar 12 se raat 8", en: "12 pm to 8 pm" },
+  { ur: "پورا دن", roman: "Poora din", en: "All day" },
+];
+
+/** A saved choice in the reader's language. Anything the person wrote themselves stays as they wrote it. */
+export function savedChoice(text: string, t: Translate): string {
+  const wanted = text.trim().toLowerCase();
+  const entry = SAVED_CHOICES.find((words) => [words.ur, words.roman.toLowerCase(), words.en.toLowerCase()].includes(wanted));
+  return entry ? t(entry.ur, entry.roman, entry.en) : text;
 }
 
 const NAME_WORDS: Record<string, string> = {
@@ -122,7 +176,9 @@ const AREAS: Record<string, string> = {
 };
 
 export function areaName(area: string, lang: Lang): string {
-  return lang === "ur" ? (AREAS[area] ?? area) : area;
+  // Sector codes such as G-9 are read the same way in both scripts.
+  if (lang !== "ur" || /^[A-Z]-\d+$/.test(area)) return area;
+  return areaUrdu.get(area) ?? AREAS[area] ?? area;
 }
 
 export function categoryName(category: Category | undefined, lang: Lang): string {
@@ -133,6 +189,12 @@ export function categoryName(category: Category | undefined, lang: Lang): string
 /** True when the text has no Urdu or Arabic letters, so it should use the Latin font. */
 export function isLatin(text: string): boolean {
   return !/[؀-ۿ]/.test(text);
+}
+
+/** One person's part of a crew's per-day price, as the server pays it: equal shares, the leader keeps the remainder. */
+export function crewShare(perDay: number, people: number, isLeader: boolean): number {
+  const share = Math.floor(perDay / Math.max(1, people));
+  return isLeader ? perDay - share * (people - 1) : share;
 }
 
 export function rupees(amount: number): string {

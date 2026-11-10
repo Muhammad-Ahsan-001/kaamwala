@@ -349,6 +349,9 @@ export const Crew = z.object({
   available: z.boolean(), // true only when every member is available
   /** People invited who have not answered yet. They are not in members and are never booked. */
   pendingCount: z.number().int(),
+  /** Reviews of work done by these members. One review of a crew job counts once, however many worked it. */
+  rating: z.number(),
+  ratingCount: z.number().int(),
 });
 export type Crew = z.infer<typeof Crew>;
 
@@ -480,6 +483,8 @@ export const WsEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("categories.changed") }),
   /** To the invited worker only. Read the details from GET /crews/invites. */
   z.object({ type: z.literal("crew.invited"), crewId: z.string() }),
+  /** To the crew's own people when someone joins, declines or leaves. Read the crew again. */
+  z.object({ type: z.literal("crew.updated"), crewId: z.string() }),
   /** Public: an open job has left the feed, because an offer was accepted or it was cancelled. */
   z.object({ type: z.literal("job.closed"), jobId: z.string() }),
 ]);

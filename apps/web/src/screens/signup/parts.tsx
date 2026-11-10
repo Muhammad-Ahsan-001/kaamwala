@@ -3,7 +3,7 @@ import { useState, type HTMLAttributes } from "react";
 import { useNavigate } from "react-router-dom";
 import { data, type AppSettings, type OnboardField } from "../../data";
 import { errorCode, errorText } from "../../data/errors";
-import { rupees, splitFee } from "../../data/labels";
+import { HOUR_PRESETS, rupees, splitFee } from "../../data/labels";
 import { useSession } from "../../lib/session";
 import { useSettings } from "../../lib/settings";
 import { toLatinDigits } from "../../lib/validate";
@@ -170,12 +170,6 @@ export function MicBlocked() {
   const { t } = useSettings();
   return <InlineError>{t("مائیک نہیں مل سکا۔ آپ لکھ کر بھر سکتے ہیں۔", "Mic nahi mil saka. Aap likh kar bhar sakte hain.", "We could not use the microphone. You can type instead.")}</InlineError>;
 }
-
-const HOUR_PRESETS = [
-  { ur: "صبح 9 سے شام 6", roman: "Subah 9 se sham 6", en: "9 am to 6 pm" },
-  { ur: "سارا دن", roman: "Saara din", en: "All day" },
-  { ur: "صرف شام کو", roman: "Sirf sham ko", en: "Evenings only" },
-];
 
 export function HourPresets({ value, onPick }: { value: string; onPick: (label: string) => void }) {
   const { t } = useSettings();

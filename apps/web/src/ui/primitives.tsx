@@ -1,5 +1,5 @@
 import { AlertCircle, CircleCheck, FlaskConical, Sparkles, Star, type LucideIcon } from "lucide-react";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useEffect, useRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { Link, type LinkProps } from "react-router-dom";
 import { isLatin } from "../data/labels";
 import { useSettings } from "../lib/settings";
@@ -292,8 +292,80 @@ export function EmptyState({ icon: Icon, title, body, action }: { icon: LucideIc
   );
 }
 
+type SheetHistory = { kwSheet?: number; idx?: unknown; key?: unknown } | null;
+type OpenSheet = { id: number; idx: unknown; key: unknown; close: () => void };
+
+/** Oldest first. Each open sheet owns one browser history entry, so the phone's back gesture closes it. */
+const openSheets: OpenSheet[] = [];
+/** Always rising, even across a reload, so a higher id means higher up the history. */
+let lastSheetId = 0;
+/** Steps through history made here. The router must not see them, or the page would replay its back animation. */
+let ownSteps = 0;
+/** What the router wrote over a sheet's entry. It moves down onto the page under the sheet, as a replace should. */
+let replacedBy: { state: unknown; url: string } | null = null;
+
+function stepBack() {
+  ownSteps += 1;
+  window.history.back();
+}
+
+function onHistoryPop(event: PopStateEvent) {
+  const state = event.state as SheetHistory;
+  const landed = state?.kwSheet ?? 0;
+  if (ownSteps > 0) {
+    ownSteps -= 1;
+    event.stopImmediatePropagation();
+  } else {
+    const above = openSheets.findIndex((sheet) => sheet.id > landed);
+    const closing = above === -1 ? [] : openSheets.splice(above).reverse();
+    // Still on the page under the sheet. Anywhere else is a real move, and that is the router's job.
+    if (closing[0] && closing[0].idx === state?.idx && closing[0].key === state?.key) event.stopImmediatePropagation();
+    for (const sheet of closing) sheet.close();
+  }
+  // Left behind when a sheet's button opened a new page. One back press must not stop on it.
+  if (landed && !openSheets.some((sheet) => sheet.id === landed)) {
+    stepBack();
+  } else if (replacedBy) {
+    window.history.replaceState(replacedBy.state, "", replacedBy.url);
+    replacedBy = null;
+  }
+}
+
+// At import, so this listener is ahead of the router's. Browsers run window listeners in the order they were added.
+window.addEventListener("popstate", onHistoryPop);
+
+function useBackClosesSheet(onClose: () => void) {
+  const latestClose = useRef(onClose);
+  latestClose.current = onClose;
+
+  useEffect(() => {
+    const below = window.history.state as SheetHistory;
+    lastSheetId = Math.max(Date.now(), lastSheetId + 1);
+    const sheet: OpenSheet = { id: lastSheetId, idx: below?.idx, key: below?.key, close: () => latestClose.current() };
+    window.history.pushState({ ...below, kwSheet: sheet.id }, "");
+    openSheets.push(sheet);
+
+    return () => {
+      const index = openSheets.indexOf(sheet);
+      if (index === -1) return; // Back already took this sheet's entry away.
+      openSheets.splice(index, 1);
+      // Wait, so a page change made by the same button is already in history.
+      window.setTimeout(() => {
+        const now = window.history.state as SheetHistory;
+        if (now?.kwSheet === sheet.id) {
+          stepBack();
+        } else if (now && !now.kwSheet && now.idx === sheet.idx && now.key !== sheet.key) {
+          replacedBy = { state: now, url: window.location.href };
+          stepBack();
+        }
+      }, 0);
+    };
+  }, []);
+}
+
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const { t } = useSettings();
+  useBackClosesSheet(onClose);
   return (
     <div className="fixed inset-0 z-[1000] flex items-end justify-center" role="dialog" aria-modal="true" aria-label={title}>
       <button type="button" aria-label={t("بند کریں", "Band karein", "Close")} className="absolute inset-0 bg-ink/40" onClick={onClose} />

@@ -357,8 +357,15 @@ type CrewFull = Prisma.CrewGetPayload<{ include: typeof crewInclude }>;
 export async function toCrews(crews: CrewFull[]): Promise<CrewDto[]> {
   const workers = [...new Map(crews.flatMap((c) => c.members.map((m) => [m.workerId, m.worker] as const))).values()];
   const cards = new Map((await workerCards(workers)).map((c) => [c.id, c]));
+  // Every worker on a crew job shares its one review, so adding up the members would count it once each.
+  const reviews = await prisma.review.findMany({
+    where: { direction: "customer_to_worker", job: { assignments: { some: { workerId: { in: workers.map((w) => w.id) } } } } },
+    select: { rating: true, job: { select: { assignments: { select: { workerId: true } } } } },
+  });
   return crews.map((c) => {
     const members = c.members.map((m) => cards.get(m.workerId) as WorkerCard);
+    const memberIds = new Set(c.members.map((m) => m.workerId));
+    const rated = reviews.filter((r) => r.job.assignments.some((a) => memberIds.has(a.workerId)));
     return {
       id: c.id,
       name: c.name,
@@ -368,6 +375,8 @@ export async function toCrews(crews: CrewFull[]): Promise<CrewDto[]> {
       rate: c.rate,
       available: members.length > 0 && members.every((m) => m.status === "available" && m.approved),
       pendingCount: c._count.members,
+      rating: rated.length ? oneDecimal(rated.reduce((sum, r) => sum + r.rating, 0) / rated.length) : 0,
+      ratingCount: rated.length,
     };
   });
 }

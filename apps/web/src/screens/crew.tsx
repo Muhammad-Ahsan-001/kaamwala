@@ -2,7 +2,7 @@ import { Check, Crown, LoaderCircle, Lock, LogOut, Mic, Plus, Send, Square, User
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { data, type Category, type Crew, type CrewInvite } from "../data";
-import { errorText } from "../data/errors";
+import { crewErrorText, errorCode, errorText } from "../data/errors";
 import { areaName, categoryName, personName, rupees } from "../data/labels";
 import { cue } from "../lib/audio";
 import { useSession } from "../lib/session";
@@ -40,12 +40,8 @@ function AvatarStack({ crew, size = 44 }: { crew: Crew; size?: number }) {
   );
 }
 
-/** Across every rating the members really have. Null when nobody has been rated yet. */
-function crewRating(crew: Crew): { value: number; count: number } | null {
-  const count = crew.members.reduce((sum, m) => sum + m.trust.ratingCount, 0);
-  if (count === 0) return null;
-  return { value: crew.members.reduce((sum, m) => sum + m.trust.rating * m.trust.ratingCount, 0) / count, count };
-}
+/** Where the crew is based: the leader's area. */
+const leaderArea = (crew: Crew): string | undefined => crew.members.find((member) => member.id === crew.leaderId)?.area;
 
 /** Accepted members are counted. People only invited are named as that, never as part of the crew. */
 function CrewHeadcount({ crew }: { crew: Crew }) {
@@ -77,6 +73,11 @@ function InviteAnswer({ invite, onDone }: { invite: CrewInvite; onDone: () => vo
       cue(choice === "accept" ? "success" : "tap", audioCues);
       onDone();
     } catch (err) {
+      // Already answered elsewhere: refreshing removes this card, and trying again could never work.
+      if (errorCode(err) === "NOT_FOUND") {
+        onDone();
+        return;
+      }
       setError(errorText(err, t));
       setWorking(null);
     }
@@ -161,7 +162,7 @@ export function CrewProfile() {
   const navigate = useNavigate();
   const { user } = useSession();
   const memberIds = useRef<string[]>([]);
-  const crew = useData(() => data.getCrew(id), [id], { reloadOn: ["worker.status"], when: (e) => e.type === "worker.status" && memberIds.current.includes(e.workerId) });
+  const crew = useData(() => data.getCrew(id), [id], { reloadOn: ["worker.status", "crew.updated"], when: (e) => (e.type === "crew.updated" ? e.crewId === id : e.type === "worker.status" && memberIds.current.includes(e.workerId)) });
   const categories = useData(() => data.listCategories(), []);
   const invites = useData(() => (user?.role === "worker" ? data.listCrewInvites() : Promise.resolve<CrewInvite[]>([])), [user?.role], { reloadOn: ["crew.invited"] });
   const [leaving, setLeaving] = useState(false);
@@ -214,25 +215,24 @@ export function CrewProfile() {
                 </h2>
                 <p className="text-sm text-soft">
                   <CrewHeadcount crew={value} />
-                  {value.members[0] && (
+                  {leaderArea(value) && (
                     <>
                       {" · "}
-                      <Auto text={areaName(value.members[0].area, lang)} />
+                      <Auto text={areaName(leaderArea(value) as string, lang)} />
                     </>
                   )}
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Tag tone={value.available ? "brand" : "plain"}>{value.available ? t("سب فارغ", "Sab farigh", "All available") : t("ٹیم مصروف ہے", "Crew masroof hai", "Crew is busy")}</Tag>
-                  {(() => {
-                    const rating = crewRating(value);
-                    return rating ? <Rating value={rating.value} count={rating.count} /> : <span className="text-sm text-soft">{t("ابھی کوئی ریٹنگ نہیں", "Abhi koi rating nahi", "No ratings yet")}</span>;
-                  })()}
+                  {value.ratingCount > 0 ? <Rating value={value.rating} count={value.ratingCount} /> : <span className="text-sm text-soft">{t("ابھی کوئی ریٹنگ نہیں", "Abhi koi rating nahi", "No ratings yet")}</span>}
                 </div>
               </Card>
 
+              {isLeader && <InviteByPhone crewId={id} onDone={crew.reload} />}
+
               <Card className="divide-y divide-line p-0">
-                {value.members.map((member) => {
-                  const category = categories.data?.find((c) => value.categoryIds.includes(c.id) && member.categoryIds.includes(c.id)) ?? categories.data?.find((c) => member.categoryIds.includes(c.id));
+                {[...value.members].sort((a, b) => Number(b.id === value.leaderId) - Number(a.id === value.leaderId)).map((member) => {
+                  const category =categories.data?.find((c) => value.categoryIds.includes(c.id) && member.categoryIds.includes(c.id)) ?? categories.data?.find((c) => member.categoryIds.includes(c.id));
                   return (
                     <Link key={member.id} to={`/app/workers/${member.id}`} className="flex min-h-16 items-center gap-3 p-3">
                       <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sunken text-brand-700">
@@ -269,7 +269,6 @@ export function CrewProfile() {
                 {t("بکنگ پر قبول شدہ سب لوگ ایک ساتھ مصروف ہو جاتے ہیں", 'Booking par shamil sab log ek saath "busy" ho jate hain', "Everyone who has joined turns busy together on booking")}
               </p>
 
-              {isLeader && <InviteByPhone crewId={id} onDone={crew.reload} />}
               {error && <InlineError>{error}</InlineError>}
               {isMember && !isLeader && (
                 <Button variant="ghost" size="md" icon={LogOut} className="w-full !text-busy-700 hover:!bg-busy-50" onClick={() => setLeaving(true)}>
@@ -307,10 +306,12 @@ function CreateCrewSheet({ categories, onClose }: { categories: Category[]; onCl
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const first = allowed.find((c) => c.id === picked[0]);
+  // The price has to hold in every trade picked, so the highest minimum applies.
+  const floor = Math.max(0, ...allowed.filter((c) => picked.includes(c.id)).map((c) => c.floorPrice));
 
   useEffect(() => {
-    if (first) setRate((current) => Math.max(first.floorPrice, current ?? first.floorPrice));
-  }, [first]);
+    if (floor > 0) setRate((current) => Math.max(floor, current ?? floor));
+  }, [floor]);
 
   const toggle = (id: string) => setPicked((list) => (list.includes(id) ? list.filter((x) => x !== id) : list.length >= 5 ? list : [...list, id]));
 
@@ -350,7 +351,8 @@ function CreateCrewSheet({ categories, onClose }: { categories: Category[]; onCl
             ))}
           </div>
         </div>
-        {first && rate !== null && <PriceCard label={t("پوری ٹیم، فی دن", "Poori crew, fi din", "Whole crew, per day")} value={rate} step={first.step} floor={first.floorPrice} days={1} onStep={(direction) => setRate((r) => Math.max(first.floorPrice, (r ?? first.floorPrice) + (direction === "up" ? first.step : -first.step)))} />}
+        {first && rate !== null && <PriceCard label={t("پوری ٹیم، فی دن", "Poori crew, fi din", "Whole crew, per day")} value={rate} step={first.step} floor={floor} days={1} onStep={(direction) => setRate((r) => Math.max(floor, (r ?? floor) + (direction === "up" ? first.step : -first.step)))} />}
+        <p className="rounded-2xl bg-sunken px-3 py-2 text-sm text-soft">{t("اگلی اسکرین پر ساتھیوں کو فون نمبر سے بلائیں گے۔ جو قبول کرے گا وہی ٹیم میں ہوگا۔", "Agli screen par saathiyon ko phone number se bulayenge. Jo qubool karega wahi crew mein hoga.", "On the next screen you invite people by phone number. Only those who accept join the crew.")}</p>
         {error && <InlineError>{error}</InlineError>}
         <Button size="xl" icon={saving ? undefined : Check} className="w-full" disabled={saving || picked.length === 0 || name.trim() === ""} onClick={() => void create()}>
           {saving ? <Spinner /> : t("ٹیم بنائیں", "Crew banayein", "Create crew")}
@@ -364,10 +366,11 @@ function CreateCrewSheet({ categories, onClose }: { categories: Category[]; onCl
 export function MyCrews() {
   const { t, lang } = useSettings();
   const { user } = useSession();
-  const crews = useData(() => data.listMyCrews(), [], { reloadOn: ["crew.invited"] });
+  const crews = useData(() => data.listMyCrews(), [], { reloadOn: ["crew.invited", "crew.updated"] });
   const invites = useData(() => data.listCrewInvites(), [], { reloadOn: ["crew.invited"] });
   const categories = useData(() => data.listCategories(), []);
-  const [creating, setCreating] = useState(false);
+  const [params] = useSearchParams();
+  const [creating, setCreating] = useState(() => params.get("new") === "1");
 
   const answered = () => {
     invites.reload();
@@ -377,7 +380,7 @@ export function MyCrews() {
   return (
     <Screen
       title={t("میری ٹیم", "Meri crew", "My crew")}
-      back="/app/jobs"
+      back
       footer={
         <Button size="xl" icon={Plus} className="w-full" disabled={!categories.data} onClick={() => setCreating(true)}>
           {t("نئی ٹیم بنائیں", "Nayi crew banayein", "Create a crew")}
@@ -533,13 +536,15 @@ export function CrewJob() {
       jobGuideUsed();
       navigate(openPost ? `/app/jobs/${job.id}/offers` : `/app/jobs/${job.id}`, { replace: true });
     } catch (err) {
-      setError(errorText(err, t));
+      setError(crewErrorText(err, t));
+      crews.reload();
     } finally {
       setSaving(false);
     }
   };
 
   const ready = Boolean(category && place && (openPost || chosen));
+  const missing = ready ? null : !category ? t("پہلے کام چنیں", "Pehle kaam chunein", "Choose the trade first") : !place ? t("پہلے علاقہ چنیں", "Pehle ilaqa chunein", "Choose your area first") : t("اوپر سے ایک ٹیم چنیں", "Upar se ek crew chunein", "Pick a crew from the list above");
   const blocked = recorder.status === "denied" || recorder.status === "unsupported";
 
   return (
@@ -547,9 +552,12 @@ export function CrewJob() {
       title={t("ٹیم کا کام", "Crew ka kaam", "Crew job")}
       back
       footer={
-        <Button size="xl" className="w-full" icon={saving ? undefined : openPost ? Send : Users} disabled={!ready || saving} onClick={() => void book()}>
-          {saving ? <Spinner /> : openPost ? t("ٹیموں سے آفر مانگیں", "Crews se offer mangein", "Ask crews for offers") : t("پوری ٹیم بلائیں", "Poori crew bulao", "Hire the whole crew")}
-        </Button>
+        <>
+          {missing && <p className="mb-1 text-center text-sm font-semibold text-soft">{missing}</p>}
+          <Button size="xl" className="w-full" icon={saving ? undefined : openPost ? Send : Users} disabled={!ready || saving} onClick={() => void book()}>
+            {saving ? <Spinner /> : openPost ? t("ٹیموں سے آفر مانگیں", "Crews se offer mangein", "Ask crews for offers") : t("پوری ٹیم بلائیں", "Poori crew bulao", "Hire the whole crew")}
+          </Button>
+        </>
       }
     >
       <Async query={crews} skeleton={<ListSkeleton />}>
@@ -630,9 +638,23 @@ export function CrewJob() {
                             <OneLine text={personName(crew.name, lang)} className="font-bold" />
                             <span className="block text-sm text-soft">
                               <CrewHeadcount crew={crew} />
+                              {leaderArea(crew) && (
+                                <>
+                                  {" · "}
+                                  <Auto text={areaName(leaderArea(crew) as string, lang)} />
+                                </>
+                              )}
                             </span>
+                            {crew.available ? (
+                              <span className="block font-bold">
+                                <span className="latin">{rupees(crew.rate)}</span> <span className="text-sm font-normal text-soft">/ {t("دن", "din", "day")}</span>
+                              </span>
+                            ) : (
+                              <span className="mt-1 block">
+                                <Tag tone="plain">{t("کوئی فرد مصروف ہے", "Koi fard masroof hai", "Someone is busy")}</Tag>
+                              </span>
+                            )}
                           </span>
-                          {crew.available ? <span className="latin shrink-0 font-bold">{rupees(crew.rate)}</span> : <Tag tone="plain">{t("مصروف", "Masroof", "Busy")}</Tag>}
                         </button>
                         <Link to={`/app/crews/${crew.id}`} className="flex min-h-12 items-center justify-center border-t border-line text-sm font-semibold text-brand-700">
                           {t("ٹیم دیکھیں", "Crew dekhein", "See this crew")}
@@ -647,7 +669,7 @@ export function CrewJob() {
             {chosen && category && price !== null && (
               <>
                 <PriceCard label={t("پوری ٹیم، فی دن", "Poori crew, fi din", "Whole crew, per day")} value={price} step={category.step} floor={category.floorPrice} days={schedule.durationDays} onStep={(direction) => setPrice((p) => Math.max(category.floorPrice, (p ?? category.floorPrice) + (direction === "up" ? category.step : -category.step)))} />
-                <BusyNotice />
+                <BusyNotice crew />
               </>
             )}
             {error && <InlineError>{error}</InlineError>}
