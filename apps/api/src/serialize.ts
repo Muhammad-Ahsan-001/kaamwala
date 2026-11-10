@@ -13,6 +13,7 @@ import type {
   ReviewView,
   TrustSummary,
   WorkerCard,
+  WorkerSelf,
 } from "@kaamwala/contracts";
 import { canonicalText } from "@kaamwala/jev";
 import type { Category, Earning, Message, Prisma, Review, User, WorkerProfile } from "@prisma/client";
@@ -170,6 +171,14 @@ export async function workerCard(id: string): Promise<WorkerCard | null> {
   if (!row) return null;
   const [card] = await workerCards([row]);
   return card ?? null;
+}
+
+/** The card plus what only the worker themselves may see. Never use this for a listing. */
+export async function workerSelf(id: string): Promise<WorkerSelf | null> {
+  const row = await prisma.workerProfile.findUnique({ where: { id }, include: { user: true } });
+  if (!row) return null;
+  const [card] = await workerCards([row]);
+  return card ? { ...card, feedCategoryIds: row.feedCategoryIds } : null;
 }
 
 /** Every past-work photo. Only a label Gemini actually gave is shown, never a guess. */

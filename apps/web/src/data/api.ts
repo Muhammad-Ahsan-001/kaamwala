@@ -41,6 +41,7 @@ import type {
   WorkerFilter,
   WorkerPatch,
   WorkerProfileDraft,
+  WorkerSelf,
   WsEvent,
 } from "./types";
 
@@ -84,9 +85,9 @@ export interface DataApi {
   getWorker(id: string): Promise<WorkerCard | null>;
   getWorkerReviews(id: string): Promise<ReviewView[]>;
   getWorkerExtras(id: string): Promise<WorkerExtras>;
-  getMyWorker(): Promise<WorkerCard>;
-  updateMyWorker(patch: WorkerPatch): Promise<WorkerCard>;
-  setAvailability(available: boolean, preset?: OfflinePreset): Promise<WorkerCard>;
+  getMyWorker(): Promise<WorkerSelf>;
+  updateMyWorker(patch: WorkerPatch): Promise<WorkerSelf>;
+  setAvailability(available: boolean, preset?: OfflinePreset): Promise<WorkerSelf>;
   createWorker(profile: NewWorker): Promise<WorkerCard>;
   /** A photo is read by Gemini (503 AI_UNAVAILABLE without it). A typed number needs no AI. */
   uploadCnic(input: Blob | { cnic: string }, onBehalf?: OnBehalf): Promise<void>;

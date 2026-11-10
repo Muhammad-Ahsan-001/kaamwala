@@ -13,6 +13,7 @@ import { isValidName, isValidPhone, toLatinDigits } from "../lib/validate";
 import { Async } from "../ui/async";
 import { CategoryIcon } from "../ui/CategoryIcon";
 import { BusyNotice, DurationPicker, JobPlaceRow, defaultSchedule, useJobPlace, type Schedule } from "../ui/hire";
+import { JobGuide, SampleNotice, SkillChips, jobGuideUsed, useSampleBox } from "../ui/JobGuide";
 import { Avatar, StatusPill } from "../ui/people";
 import { PriceCard } from "../ui/PriceCard";
 import { Auto, Button, Card, Chip, EmptyState, Field, InlineError, LinkButton, ListSkeleton, OneLine, Rating, SectionTitle, Sheet, Tag, cx } from "../ui/primitives";
@@ -433,6 +434,8 @@ export function CrewJob() {
   const [openPost, setOpenPost] = useState(false);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [description, setDescription] = useState("");
+  const sampleBox = useSampleBox(description, setDescription);
+  const descriptionBox = useRef<HTMLTextAreaElement>(null);
   const [schedule, setSchedule] = useState<Schedule>(defaultSchedule(2));
   const [price, setPrice] = useState<number | null>(null);
   const [descriptionError, setDescriptionError] = useState(false);
@@ -484,6 +487,14 @@ export function CrewJob() {
     }
   };
 
+  /** Only fills the box. The customer changes it and books themselves. */
+  const fillSample = (words: string) => {
+    sampleBox.fill(words);
+    setDescriptionError(false);
+    cue("tap", audioCues);
+    descriptionBox.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
   /** Fills in the trade from what was typed. Runs on the local matcher, with no AI call. */
   const guessTrade = () => {
     const text = description.trim();
@@ -519,6 +530,7 @@ export function CrewJob() {
         proposedPrice: chosen ? (price ?? undefined) : undefined,
       });
       cue("success", audioCues);
+      jobGuideUsed();
       navigate(openPost ? `/app/jobs/${job.id}/offers` : `/app/jobs/${job.id}`, { replace: true });
     } catch (err) {
       setError(errorText(err, t));
@@ -548,11 +560,16 @@ export function CrewJob() {
                 {t("کیا کام ہے؟", "Kya kaam hai?", "What's the job?")}
               </label>
               <div className="relative">
-                <textarea id="crew-desc" dir="auto" rows={2} className={cx("field resize-none rtl:pl-16 ltr:pr-16", descriptionError && "border-busy-500")} value={description} onChange={(e) => setDescription(e.target.value)} onBlur={guessTrade} placeholder={t("لکھیں یا بول کر بتائیں", "Likhein ya bol kar batayein", "Type it or say it")} />
+                <textarea ref={descriptionBox} id="crew-desc" dir="auto" rows={3} className={cx("field resize-none rtl:pl-16 ltr:pr-16", descriptionError && "border-busy-500")} value={description} onChange={(e) => setDescription(e.target.value)} onBlur={guessTrade} placeholder={t("کیا کام ہے، کہاں، کب سے، کتنے دن؟ جیسے: دو کمروں میں ٹائل، جی نائن، پیر سے، تین دن", "Kya kaam hai, kahan, kab se, kitne din? Jaise: do kamron mein tile, G-9, peer se, teen din", "What work, where, from when, how many days? e.g. tiles in two rooms, G-9, from Monday, 3 days")} />
                 <button type="button" onClick={() => void dictate()} disabled={listening} aria-label={recording ? t("ریکارڈنگ ختم کریں", "Recording khatam karein", "Stop recording") : t("بول کر بتائیں", "Bol kar batayein", "Speak")} className={cx("absolute end-1 top-1 flex h-12 w-12 items-center justify-center rounded-xl transition active:scale-95 disabled:opacity-50", recording ? "bg-busy-500 text-white" : "bg-brand-100 text-brand-700")}>
                   {listening ? <Spinner /> : recording ? <Square className="h-5 w-5 fill-current" aria-hidden /> : <Mic className="h-6 w-6" aria-hidden />}
                 </button>
               </div>
+              {sampleBox.unedited && (
+                <div className="mt-2">
+                  <SampleNotice box={sampleBox} />
+                </div>
+              )}
               {descriptionError && <p className="mt-1 text-sm font-bold text-busy-700">{t("کام بتائیں", "Kaam batayein", "Please describe the job")}</p>}
               {voiceError && (
                 <div className="mt-2">
@@ -561,6 +578,8 @@ export function CrewJob() {
               )}
               {blocked && <p className="mt-1 text-sm font-semibold text-busy-700">{t("مائیک نہیں مل سکا، لکھ کر بتائیں", "Mic nahi mil saka, likh kar batayein", "Could not use the microphone. Please type instead.")}</p>}
             </div>
+
+            <JobGuide kind="crew" silenced={recording} onSample={fillSample} lead={t("لکھیں یا مائیک دبا کر یہ باتیں بتائیں", "Likhein ya mic daba kar ye baatein batayein", "Type, or tap the mic and say these things")} />
 
             <div>
               <p className="mb-1 font-bold">{t("کون سا کام؟", "Kaun sa kaam?", "Which trade?")}</p>
@@ -573,6 +592,8 @@ export function CrewJob() {
                 ))}
               </div>
             </div>
+
+            {category && <SkillChips category={category} text={description} onChange={setDescription} />}
 
             <div>
               <p className="mb-1 font-bold">{t("کہاں؟", "Kahan?", "Where?")}</p>

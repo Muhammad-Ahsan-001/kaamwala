@@ -6,7 +6,7 @@ import { authOf, normalizePhone, requireAuth, signToken } from "../auth";
 import { prisma } from "../db";
 import { env } from "../env";
 import { AppError, suspended, unauthorized } from "../errors";
-import { hirerCard, toAuthUser, workerCard } from "../serialize";
+import { hirerCard, toAuthUser, workerSelf } from "../serialize";
 
 const OTP_TTL_MS = 5 * 60 * 1000;
 const authLimit = { rateLimit: { max: env.RATE_LIMIT_AUTH_PER_MIN, timeWindow: "1 minute" } };
@@ -80,7 +80,7 @@ export async function authRoutes(app: FastifyInstance) {
     const { user, worker } = authOf(req);
     const [authUser, workerDto, hirer] = await Promise.all([
       authUserFor(user.id),
-      worker ? workerCard(worker.id) : null,
+      worker ? workerSelf(worker.id) : null,
       prisma.hirerProfile.count({ where: { userId: user.id } }).then((n) => (n ? hirerCard(user.id, { own: true }) : null)),
     ]);
     return { user: authUser, worker: workerDto, hirer };

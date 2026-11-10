@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { OfflinePreset, WorkerCard } from "@kaamwala/contracts";
+import type { OfflinePreset, WorkerCard, WorkerSelf } from "@kaamwala/contracts";
 import { significantWords, tokenize } from "@kaamwala/jev";
 import { Prisma, type WorkerProfile } from "@prisma/client";
 import { AREAS } from "../areas";
@@ -12,7 +12,7 @@ import { conflict, forbidden, notFound, unprocessable } from "../errors";
 import { endOfDayPkt } from "../geo";
 import { hub } from "../hub";
 import { getActiveCategories, jev } from "../jev";
-import { workerCard, workerCards } from "../serialize";
+import { workerCard, workerCards, workerSelf } from "../serialize";
 import { cancelInTx } from "./jobs";
 import { splitAgentFee } from "./pricing";
 import { readSettings } from "./settings";
@@ -219,12 +219,13 @@ export async function createWorker(auth: AuthContext, input: WorkerInput): Promi
   return (await workerCard(profile.id)) as WorkerCard;
 }
 
-export async function updateWorker(worker: WorkerProfile, input: Partial<WorkerInput>, userId: string): Promise<WorkerCard> {
+export async function updateWorker(worker: WorkerProfile, input: Partial<WorkerInput> & { feedCategoryIds?: string[] | undefined }, userId: string): Promise<WorkerSelf> {
   const categoryIds =
     input.categoryIds?.length || input.trade ? resolveCategories(input) : worker.categoryIds;
   const place = input.area ? await resolveLocation(input.area, input.location) : null;
   const data: Prisma.WorkerProfileUpdateInput = {
     categoryIds,
+    ...(input.feedCategoryIds ? { feedCategoryIds: resolveCategories({ categoryIds: input.feedCategoryIds }) } : {}),
     ...(input.skills || input.trade ? { skills: resolveSkills(input, categoryIds) } : {}),
     ...(input.years !== undefined ? { years: input.years } : {}),
     ...(input.rate !== undefined ? { rate: input.rate } : {}),
@@ -236,7 +237,7 @@ export async function updateWorker(worker: WorkerProfile, input: Partial<WorkerI
     prisma.workerProfile.update({ where: { id: worker.id }, data }),
     ...(input.name ? [prisma.user.update({ where: { id: userId }, data: { name: input.name } })] : []),
   ]);
-  return (await workerCard(worker.id)) as WorkerCard;
+  return (await workerSelf(worker.id)) as WorkerSelf;
 }
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -285,7 +286,7 @@ export async function setAvailability(workerId: string, input: { available: bool
     }
     await setStatus(tx, fx, [workerId], "offline", offlineUntilFor(input.preset ?? "manual"));
   });
-  return (await workerCard(workerId)) as WorkerCard;
+  return (await workerSelf(workerId)) as WorkerSelf;
 }
 
 export const hashCnic = (digits: string) => createHash("sha256").update(`${env.CNIC_SALT}:${digits}`).digest("hex");

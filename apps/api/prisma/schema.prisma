@@ -160,6 +160,8 @@ model WorkerProfile {
   userId           String       @unique
   user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   categoryIds      String[]
+  /// Trades of open jobs this worker chose to see. Empty means the trades in categoryIds.
+  feedCategoryIds  String[]     @default([])
   skills           String[]
   years            Int          @default(0)
   rate             Int          @default(0)

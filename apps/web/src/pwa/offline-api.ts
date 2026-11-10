@@ -1,6 +1,6 @@
 import type { DataApi } from "../data/api";
 import { ApiError, errorCode } from "../data/errors";
-import type { Job, OfflinePreset, ReviewView, WorkerCard, WorkerDetail, WorkerExtras } from "../data/types";
+import type { Job, OfflinePreset, ReviewView, WorkerCard, WorkerDetail, WorkerExtras, WorkerSelf } from "../data/types";
 import { copyKey, forgetCopiesExcept, markStale, readCopy, saveCopy, type Saved } from "../lib/offline";
 import { enqueue, dropQueuedAvailability, flush, isTransient, noteReachable, noteSavedCopyShown, noteUnreachable, overlayJob, overlayWorker, pendingFor, startSync, whenQueueLoaded, type QueuedAction } from "./queue";
 import { askForPushSoon, pushEndpoint } from "./signals";
@@ -204,7 +204,7 @@ export function withOffline(live: DataApi): DataApi {
         void saveCopy(copyKey(KEY.myWorker), result.value);
         return result.value;
       }
-      const saved = await readCopy<WorkerCard>(copyKey(KEY.myWorker));
+      const saved = await readCopy<WorkerSelf>(copyKey(KEY.myWorker));
       if (!saved) throw networkError();
       if (overlayCard(saved.value).status === "engaged") throw new ApiError("WORKER_ENGAGED", "Finish the current job first.", 409);
       await enqueue({ kind: "availability", userId: user, available, ...(preset ? { preset } : {}) });

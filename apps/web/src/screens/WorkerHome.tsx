@@ -1,7 +1,7 @@
 import { Bell, BellRing, CalendarDays, Check, CheckCheck, ChevronLeft, Eye, Flag, Hourglass, Lock, MapPin, MessageCircle, MonitorSmartphone, Send, Settings as SettingsIcon, Users, UsersRound, Volume2, Wallet, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { data, type Category, type Crew, type CrewInvite, type Job, type JobFeedItem, type LatLng, type OfflinePreset, type Offer, type WorkerCard } from "../data";
+import { data, type Category, type Crew, type CrewInvite, type Job, type JobFeedItem, type LatLng, type OfflinePreset, type Offer, type WorkerCard, type WorkerSelf } from "../data";
 import { errorCode, errorText } from "../data/errors";
 import { areaName, categoryName, firstName, isLatin, personName, rupees } from "../data/labels";
 import { cue, speakUrdu } from "../lib/audio";
@@ -12,6 +12,7 @@ import { useConnection, useData } from "../lib/useData";
 import { useSettings, type Lang } from "../lib/settings";
 import { ErrorState } from "../ui/async";
 import { CategoryIcon } from "../ui/CategoryIcon";
+import { JobFeedButton, JobFeedSheet } from "../ui/JobFeedPicker";
 import { DayProgress, PriceMath } from "../ui/hire";
 import { Avatar } from "../ui/people";
 import { PriceCard } from "../ui/PriceCard";
@@ -555,7 +556,7 @@ function InviteCard({ invite, categories, working, error, onAccept, onDecline }:
   );
 }
 
-function FeedCard({ job, category, area, speech, fresh, offer, canBid, onOffer, onHide }: { job: JobFeedItem; category?: Category; area: string; speech: string; fresh: boolean; offer?: Offer; canBid: boolean; onOffer: () => void; onHide: () => void }) {
+function FeedCard({ job, category, area, speech, fresh, offer, canBid, notMyTrade, onOffer, onHide }: { job: JobFeedItem; category?: Category; area: string; speech: string; fresh: boolean; offer?: Offer; canBid: boolean; notMyTrade: boolean; onOffer: () => void; onHide: () => void }) {
   const { t, lang } = useSettings();
   const hasRange = job.priceMin !== null && job.priceMax !== null;
   return (
@@ -571,6 +572,7 @@ function FeedCard({ job, category, area, speech, fresh, offer, canBid, onOffer, 
                 {t("ٹیم کا کام", "Crew ka kaam", "Crew job")}
               </Tag>
             )}
+            {notMyTrade && <Tag tone="plain">{t("آپ کا شعبہ نہیں", "Aap ka shoba nahi", "Not your trade")}</Tag>}
             {job.urgency === "urgent" && <Tag tone="busy">{t("فوری", "Jaldi", "Urgent")}</Tag>}
           </div>
           <p className="text-sm text-soft">{ago(job.createdAt, t)}</p>
@@ -703,7 +705,8 @@ export function WorkerHome() {
   const navigate = useNavigate();
   const workerId = data.currentUser()?.workerId ?? null;
 
-  const [me, setMe] = useState<WorkerCard | null>(null);
+  const [me, setMe] = useState<WorkerSelf | null>(null);
+  const [choosingFeed, setChoosingFeed] = useState(false);
   const [chosen, setChosen] = useState<OfflinePreset | null>(null);
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -1025,6 +1028,16 @@ export function WorkerHome() {
     writeHidden([]);
   };
 
+  const feedChosen = (worker: WorkerSelf) => {
+    setChoosingFeed(false);
+    setMe(worker);
+    // These jobs are not new, so they must not ring and flash like one that was just posted.
+    seenFeed.current = null;
+    setFresh([]);
+    feed.reload();
+    profile.reload();
+  };
+
   const openOffer = (job: JobFeedItem) => {
     const existing = myOffers.data?.get(job.id);
     const led = job.mode === "crew" ? ledCrewsFor(job.categoryId) : [];
@@ -1057,6 +1070,9 @@ export function WorkerHome() {
   const visibleJobs = feedJobs.filter((job) => !hidden.includes(job.id));
   const hiddenCount = feedJobs.length - visibleJobs.length;
   const canBid = mode === "available";
+  const feedShown = mode !== "engaged" && mode !== "pending";
+  const feedIsEmpty = feedShown && feed.data !== null && visibleJobs.length === 0;
+  const feedControl = me && <JobFeedButton worker={me} categories={allCategories} disabled={!categories.data} onClick={() => setChoosingFeed(true)} />;
   const offerCrews = offerJob?.mode === "crew" ? ledCrewsFor(offerJob.categoryId) : [];
   const earningsValue = earnings.data;
   const nextDay = active?.days.find((day) => day.status === "scheduled") ?? null;
@@ -1157,17 +1173,18 @@ export function WorkerHome() {
 
         <section>
           <SectionTitle action={<LiveBadge />}>{t("قریب کے نئے کام", "Qareeb ke naye kaam", "New jobs nearby")}</SectionTitle>
+          {feedControl && !feedIsEmpty && <div className="mb-3">{feedControl}</div>}
           {mode && mode !== "available" && <FeedBlocked mode={mode} onGoAvailable={() => applyAvailability(true)} />}
           {mode === "engaged" || mode === "pending" ? null : feed.error && !feed.data ? (
             <ErrorState onRetry={feed.reload} />
           ) : !feed.data ? (
             <ListSkeleton rows={2} />
           ) : visibleJobs.length === 0 ? (
-            <EmptyState icon={Bell} title={t("ابھی کوئی نیا کام نہیں", "Abhi koi naya kaam nahi", "No new jobs right now")} body={t("کام آتے ہی یہاں خود نظر آئے گا", "Kaam aate hi yahan khud nazar aayega", "A new job appears here by itself the moment it is posted")} />
+            <EmptyState icon={Bell} title={t("ابھی کوئی نیا کام نہیں", "Abhi koi naya kaam nahi", "No new jobs right now")} body={t("کام آتے ہی یہاں خود نظر آئے گا۔ چاہیں تو دوسرے کام بھی چن لیں۔", "Kaam aate hi yahan khud nazar aayega. Chahein to doosre kaam bhi chun lein.", "A new job appears here by itself the moment it is posted. You can also choose other kinds of jobs.")} action={feedControl || undefined} />
           ) : (
             <div className="stagger space-y-3">
               {visibleJobs.map((job) => (
-                <FeedCard key={job.id} job={job} category={category(job.categoryId)} area={areaIn(job.area, lang)} speech={`نیا کام۔ ${speechFor(job, job.distanceKm)}`} fresh={fresh.includes(job.id)} offer={myOffers.data?.get(job.id)} canBid={canBid} onOffer={() => openOffer(job)} onHide={() => hideJob(job.id)} />
+                <FeedCard key={job.id} job={job} category={category(job.categoryId)} area={areaIn(job.area, lang)} speech={`نیا کام۔ ${speechFor(job, job.distanceKm)}`} fresh={fresh.includes(job.id)} offer={myOffers.data?.get(job.id)} canBid={canBid} notMyTrade={job.mode === "open" && me !== null && !me.categoryIds.includes(job.categoryId)} onOffer={() => openOffer(job)} onHide={() => hideJob(job.id)} />
               ))}
             </div>
           )}
@@ -1241,6 +1258,8 @@ export function WorkerHome() {
           <PriceMath perDay={perDay} days={doneDays} className="mt-2 text-lg" />
         </ConfirmSheet>
       )}
+
+      {choosingFeed && me && <JobFeedSheet worker={me} categories={allCategories} onClose={() => setChoosingFeed(false)} onSaved={feedChosen} />}
 
       {offerJob && (
         <Sheet title={myOffers.data?.get(offerJob.id) ? t("قیمت بدلیں", "Qeemat badlein", "Change your price") : t("آپ کی قیمت", "Aapki qeemat", "Your price")} onClose={() => setOfferJob(null)}>

@@ -281,12 +281,13 @@ export function ListSkeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-export function EmptyState({ icon: Icon, title, body }: { icon: LucideIcon; title: string; body?: string }) {
+export function EmptyState({ icon: Icon, title, body, action }: { icon: LucideIcon; title: string; body?: string; action?: ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-3xl bg-sunken px-6 py-8 text-center">
+    <div className={cx("flex flex-col items-center gap-2 rounded-3xl bg-sunken py-8 text-center", action ? "px-4" : "px-6")}>
       <Icon className="h-10 w-10 text-brand-600" aria-hidden />
       <p className="text-lg font-bold">{title}</p>
       {body && <p className="text-soft">{body}</p>}
+      {action && <div className="mt-1 w-full">{action}</div>}
     </div>
   );
 }

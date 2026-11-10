@@ -100,6 +100,13 @@ export const WorkerCard = z.object({
 });
 export type WorkerCard = z.infer<typeof WorkerCard>;
 
+/** A worker's own view of themselves. Only ever sent to that worker, never in a listing. */
+export const WorkerSelf = WorkerCard.extend({
+  /** The trades of open jobs this worker chose to see. Empty means their own trades. */
+  feedCategoryIds: z.array(z.string()),
+});
+export type WorkerSelf = z.infer<typeof WorkerSelf>;
+
 /** One past-work photo. skill is what Gemini saw in it, null when AI did not run or saw no work. */
 export const PastWork = z.object({ id: z.string(), url: z.string(), skill: z.string().nullable() });
 export type PastWork = z.infer<typeof PastWork>;
@@ -560,7 +567,8 @@ export type WsEventType = WsEvent["type"];
  * Response shapes
  *   Lists return {items: [...]}. GET /workers also returns
  *   detected: {categoryId, confidence, skills} | null, when `q` was given.
- *   GET /me returns {user: AuthUser, worker: WorkerCard | null, hirer: HirerCard | null}.
+ *   GET /me returns {user: AuthUser, worker: WorkerSelf | null, hirer: HirerCard | null}.
+ *   PATCH /workers/me and POST /workers/me/availability return WorkerSelf.
  *   GET /workers/:id returns WorkerDetail. GET /jobs/open returns JobFeedItem[].
  *
  * Typed sign-up (no audio, no Gemini needed)

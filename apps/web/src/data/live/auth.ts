@@ -1,10 +1,10 @@
 import type { DataApi } from "../api";
 import { ApiError } from "../errors";
-import type { AuthUser, HirerCard, WorkerCard } from "../types";
+import type { AuthUser, HirerCard, WorkerSelf } from "../types";
 import { request } from "./http";
 import { sessionStore } from "./session-store";
 
-export type Me = { user: AuthUser; worker: WorkerCard | null; hirer: HirerCard | null };
+export type Me = { user: AuthUser; worker: WorkerSelf | null; hirer: HirerCard | null };
 
 let inFlight: Promise<Me> | null = null;
 

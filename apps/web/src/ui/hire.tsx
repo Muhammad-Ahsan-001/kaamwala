@@ -1,7 +1,7 @@
 import { CalendarDays, CheckCheck, Lock, MapPin, Minus, Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { data, type Area, type JobDay, type LatLng, type ProblemAnalysis } from "../data";
-import { areaName, rupees } from "../data/labels";
+import { areaName, isLatin, rupees } from "../data/labels";
 import { cue } from "../lib/audio";
 import { MAX_DAYS, MAX_START_AHEAD, MIN_DAYS, addDays, dateLabel, rangeLabel, today } from "../lib/dates";
 import { useSettings, type Lang } from "../lib/settings";
@@ -38,6 +38,8 @@ export type DescribedProblem = {
   text: string;
   photo: Blob | null;
   mode: DescribeMode;
+  /** Skills the customer added with a tap, after what they said. */
+  extra?: string;
 };
 
 let describedProblem: DescribedProblem | null = null;
@@ -50,9 +52,39 @@ export const forgetProblem = () => {
   describedProblem = null;
 };
 
+/** Adds words after what is already written, as the next item of a list. */
+export function addWords(text: string, words: string): string {
+  const written = text.trimEnd();
+  if (!written) return words;
+  if (/[۔.!?؟،,:]$/.test(written)) return `${written} ${words}`;
+  return `${written}${isLatin(written) ? ", " : "، "}${words}`;
+}
+
+/** Where the words stand alone as a list item, the way addWords leaves them. A word inside the customer's own sentence does not count. */
+function listedAt(text: string, words: string): number {
+  for (let at = text.indexOf(words); at >= 0; at = text.indexOf(words, at + 1)) {
+    const before = text.slice(0, at).trimEnd();
+    const after = text.slice(at + words.length).trimStart();
+    if ((!before || /[۔.!?؟،,:]$/.test(before)) && (!after || /^[،,۔.]/.test(after))) return at;
+  }
+  return -1;
+}
+
+export const isListed = (text: string, words: string) => listedAt(text, words) >= 0;
+
+/** Takes a list item back out, along with the comma that joined it. Never touches the customer's own sentence. */
+export function dropWords(text: string, words: string): string {
+  const at = listedAt(text, words);
+  if (at < 0) return text;
+  const before = text.slice(0, at).replace(/[،,]?\s*$/, "");
+  const after = text.slice(at + words.length).replace(/^\s*[،,]?\s*/, "");
+  return before && after ? addWords(before, after) : before || after;
+}
+
 /** What the worker reads: the customer's own words when there are any. */
-export function problemDescription(problem: Pick<DescribedProblem, "analysis" | "text">): string {
-  return (problem.analysis.transcript?.trim() || problem.text.trim() || problem.analysis.summary.trim()).slice(0, 2000);
+export function problemDescription(problem: Pick<DescribedProblem, "analysis" | "text" | "extra">): string {
+  const said = problem.analysis.transcript?.trim() || problem.text.trim() || problem.analysis.summary.trim();
+  return (problem.extra ? addWords(said, problem.extra) : said).slice(0, 2000);
 }
 
 export type JobPlace = { area: string; location: LatLng };

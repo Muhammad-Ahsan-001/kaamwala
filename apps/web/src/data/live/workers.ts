@@ -1,6 +1,6 @@
 import type { DataApi } from "../api";
 import { ApiError } from "../errors";
-import type { EarningsView, OnBehalf, PhotoUploadResult, WorkerCard, WorkerDetail } from "../types";
+import type { EarningsView, OnBehalf, PhotoUploadResult, WorkerCard, WorkerDetail, WorkerSelf } from "../types";
 import { me } from "./auth";
 import { AI_TIMEOUT_MS, compact, imageForm, orNull, request } from "./http";
 import { sessionStore } from "./session-store";
@@ -63,9 +63,9 @@ export const workersApi: Pick<
     return worker;
   },
 
-  updateMyWorker: (patch) => request<WorkerCard>("PATCH", "/workers/me", { body: compact(patch) }),
+  updateMyWorker: (patch) => request<WorkerSelf>("PATCH", "/workers/me", { body: compact(patch) }),
 
-  setAvailability: (available, preset) => request<WorkerCard>("POST", "/workers/me/availability", { body: compact({ available, preset }) }),
+  setAvailability: (available, preset) => request<WorkerSelf>("POST", "/workers/me/availability", { body: compact({ available, preset }) }),
 
   createWorker: async (profile) => {
     const card = await request<WorkerCard>("POST", "/workers", {

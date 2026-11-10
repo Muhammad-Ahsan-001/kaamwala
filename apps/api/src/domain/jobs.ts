@@ -10,6 +10,7 @@ import { pushToUsers } from "../push";
 import { jobInclude, offerInclude, oneDecimal, toJob, toOffers, toOpenJobView, type JobFull } from "../serialize";
 import { bookedTime, dayDates, jobFacts } from "./days";
 import { priceEstimate, type PriceEstimate } from "./estimate";
+import { feedTrades, mayBidOnTrade } from "./feedTrades";
 import { openJobRecipients, withinOpenJobRadius, workerMatchesOpenJob } from "./openJobs";
 import { movePrice as nextPrice, splitEarnings, type PriceDirection } from "./pricing";
 import { assertAllAvailable, lockCrew, lockJob, lockWorkers, releaseWorkers, runTx, setStatus, type Effects } from "./tx";
@@ -259,7 +260,7 @@ export async function listOpenFeed(auth: AuthContext): Promise<JobFeedItem[]> {
       status: "open",
       customerId: { not: auth.user.id },
       OR: [
-        { mode: "open", categoryId: { in: worker.categoryIds } },
+        { mode: "open", categoryId: { in: feedTrades(worker) } },
         { mode: "crew", categoryId: { in: crewTrades } },
       ],
     },
@@ -337,7 +338,7 @@ export async function createOffer(
     requireStatus(job, ["open"]);
     if (job.customerId === auth.user.id) throw unprocessable("CANNOT_HIRE_SELF", "You cannot bid on your own job.");
     if (input.price < job.floor) throw unprocessable("BELOW_FLOOR", `The minimum for this work is Rs ${job.floor}.`);
-    if (!worker.categoryIds.includes(job.categoryId) && !input.crewId) {
+    if (!mayBidOnTrade(worker, job.categoryId) && !input.crewId) {
       throw forbidden("This job is not in your trade.");
     }
     if (job.mode === "crew" && !input.crewId) throw unprocessable("CREW_REQUIRED", "Only crews can bid on this job.");

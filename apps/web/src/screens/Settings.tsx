@@ -1,8 +1,11 @@
-import { CircleCheck, Languages, LogOut, MonitorSmartphone, Sun, Volume2, type LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { CircleCheck, Languages, ListChecks, LogOut, MonitorSmartphone, Sun, Volume2, type LucideIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { data, type WorkerSelf } from "../data";
 import { useLogout, useSession } from "../lib/session";
 import { useSettings } from "../lib/settings";
+import { useData } from "../lib/useData";
 import { PwaSettings } from "../pwa/PwaSettings";
+import { feedSummary, JOB_FEED_QUESTION, JobFeedSheet } from "../ui/JobFeedPicker";
 import { Button, Card, Switch } from "../ui/primitives";
 import { LangPills, Screen } from "../ui/shell";
 
@@ -41,6 +44,43 @@ function KeepAwakeRow() {
   );
 }
 
+function JobFeedRow() {
+  const { t, lang } = useSettings();
+  const worker = useData(() => data.getMyWorker(), []);
+  const categories = useData(() => data.listCategories(), [], { reloadOn: ["categories.changed"] });
+  const [choosing, setChoosing] = useState(false);
+  const [saved, setSaved] = useState<WorkerSelf | null>(null);
+  const me = saved ?? worker.data;
+  if (!me || !categories.data) return null;
+
+  // One wrapper, so the sheet is not a sibling that the card's row dividers draw a line on.
+  return (
+    <div>
+      <Row
+        icon={ListChecks}
+        title={t(...JOB_FEED_QUESTION)}
+        body={feedSummary(me, categories.data, lang, t)}
+        control={
+          <Button variant="secondary" size="md" onClick={() => setChoosing(true)}>
+            {t("چنیں", "Chunein", "Choose")}
+          </Button>
+        }
+      />
+      {choosing && (
+        <JobFeedSheet
+          worker={me}
+          categories={categories.data}
+          onClose={() => setChoosing(false)}
+          onSaved={(card) => {
+            setSaved(card);
+            setChoosing(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 export function SettingsScreen() {
   const { t, sunlight, setSunlight, audioCues, setAudioCues } = useSettings();
   const { user } = useSession();
@@ -65,6 +105,8 @@ export function SettingsScreen() {
           body={t("تیز رنگ اور بڑے حروف، دھوپ میں پڑھنے کے لیے", "Tez rang aur bare huroof, dhoop mein parhne ke liye", "Maximum contrast and larger text for outdoors")}
           control={<Switch checked={sunlight} onChange={setSunlight} label={t("دھوپ کا موڈ", "Dhoop mode", "Sunlight mode")} />}
         />
+
+        {user?.role === "worker" && user.workerId && <JobFeedRow />}
 
         {user?.role === "worker" && <KeepAwakeRow />}
 

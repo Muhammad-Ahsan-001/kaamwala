@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { authOf, requireAuth, requireRole } from "../auth";
 import { prisma } from "../db";
+import { FeedCategoryIds } from "../domain/feedTrades";
 import {
   cleanCnic,
   createWorker,
@@ -42,7 +43,7 @@ const CreateWorker = z.object({ ...WorkerFields, forPhone: z.string().optional()
   (b) => b.categoryIds?.length || b.trade,
   { message: "Give a trade or choose categories." },
 );
-const UpdateWorker = z.object(WorkerFields).partial();
+const UpdateWorker = z.object({ ...WorkerFields, feedCategoryIds: FeedCategoryIds }).partial();
 
 const num = z.coerce.number();
 const SearchQuery = z.object({

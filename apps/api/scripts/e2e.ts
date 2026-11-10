@@ -1198,6 +1198,56 @@ async function main() {
   const farScope = { mode: "crew" as const, categoryId: "plumber", lat: 24.82, lng: 67.03 };
   check("nor does a leader out of range", !(await openJobRecipients(farScope)).some((r) => r.userId === rashid.userId));
 
+  section("Regression: a worker chooses which open jobs they see");
+  const chooser = await login("+923007004001", "worker");
+  await api("POST", "/workers", { token: chooser.token, body: { name: "Pasand Wala Karigar", area: "G-9", location: G9, categoryIds: ["plumber"] } });
+  const chooserId = (await login("+923007004001")).workerId as string;
+  const openFor = async (id: string) => ((await api("GET", "/jobs/open", { token: chooser.token })).body.items as Job[]).some((j) => j.id === id);
+  const postOpen = async (categoryId: string) => (await waitOutLimit(() => api<Job>("POST", "/jobs", { token: buyer.token, body: jobBody({ mode: "open", categoryId }) }))).body as Job;
+  const reaches = async (categoryId: string) => (await openJobRecipients({ mode: "open", categoryId, ...G9 })).some((r) => r.userId === chooser.userId);
+
+  const electricOpen = await postOpen("electrician");
+  const plumberOpen = await postOpen("plumber");
+  const painterOpen = await postOpen("painter");
+  check("a new worker has chosen nothing", ((await api("GET", "/me", { token: chooser.token })).body.worker.feedCategoryIds as string[]).length === 0);
+  check("with no choice the feed is their own trades", (await openFor(plumberOpen.id)) && !(await openFor(electricOpen.id)));
+
+  const noneChosen = await api("PATCH", "/workers/me", { token: chooser.token, body: { feedCategoryIds: [] } });
+  check("clearing every trade is refused", noneChosen.status === 400 && noneChosen.body.error.code === "VALIDATION_ERROR", noneChosen);
+  const unknownTrade = await api("PATCH", "/workers/me", { token: chooser.token, body: { feedCategoryIds: ["no-such-trade"] } });
+  check("an unknown trade is refused", unknownTrade.status === 422 && unknownTrade.body.error.code === "CATEGORY_NOT_FOUND", unknownTrade);
+
+  const chosenFeed = await api("PATCH", "/workers/me", { token: chooser.token, body: { feedCategoryIds: ["electrician", "electrician"] } });
+  check("the choice is saved once per trade", chosenFeed.status === 200 && JSON.stringify(chosenFeed.body.feedCategoryIds) === '["electrician"]', chosenFeed.body);
+  check("and comes back from /me", JSON.stringify((await api("GET", "/me", { token: chooser.token })).body.worker.feedCategoryIds) === '["electrician"]');
+  check("the profile's own trades are untouched", JSON.stringify(chosenFeed.body.categoryIds) === '["plumber"]', chosenFeed.body.categoryIds);
+  check("it is not on the public profile", !("feedCategoryIds" in (await api("GET", `/workers/${chooserId}`)).body));
+  const inSearch = ((await api("GET", `/workers?lat=${G9.lat}&lng=${G9.lng}&radiusKm=60&categoryId=plumber`)).body.items as WorkerCard[]).find((w) => w.id === chooserId);
+  check("nor in search results", inSearch !== undefined && !("feedCategoryIds" in inSearch), inSearch);
+
+  check("the feed now follows the choice", (await openFor(electricOpen.id)) && !(await openFor(plumberOpen.id)));
+  check("a chosen job can be opened by id", (await api("GET", `/jobs/${electricOpen.id}`, { token: chooser.token })).status === 200);
+  check("a job outside the choice cannot", (await api("GET", `/jobs/${painterOpen.id}`, { token: chooser.token })).status === 403);
+  check("the open-job push reaches a chosen trade", await reaches("electrician"));
+  check("and skips a trade they left out", !(await reaches("plumber")));
+
+  const chooserSocket = new Listener(chooser.token);
+  await chooserSocket.ready();
+  const liveChosen = await postOpen("electrician");
+  const liveLeftOut = await postOpen("plumber");
+  await sleep(500);
+  check("live events arrive for a chosen trade", chooserSocket.jobEvents(liveChosen.id).length > 0);
+  check("and not for one they left out", chooserSocket.jobEvents(liveLeftOut.id).length === 0);
+  chooserSocket.close();
+
+  const bidOn = (job: Job) => api("POST", `/jobs/${job.id}/offers`, { token: chooser.token, body: { price: job.floor } });
+  check("a chosen trade can be bid on", (await bidOn(electricOpen)).status === 201);
+  check("so can their own trade, even when left out", (await bidOn(plumberOpen)).status === 201);
+  check("anything else is refused", (await bidOn(painterOpen)).status === 403);
+  const chosenDirect = await api("POST", "/jobs", { token: buyer.token, body: jobBody({ mode: "direct", workerId: chooserId }) });
+  check("direct requests still follow the profile's trades", chosenDirect.status === 422 && chosenDirect.body.error.code === "WRONG_TRADE", chosenDirect);
+  for (const job of [electricOpen, plumberOpen, painterOpen, liveChosen, liveLeftOut]) await api("POST", `/jobs/${job.id}/cancel`, { token: buyer.token });
+
   section("Regression: abandoned requests expire");
   const adnan = await login("+923100000014");
   const bilal = await login("+923100000015");

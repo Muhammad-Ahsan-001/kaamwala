@@ -40,6 +40,7 @@ export type {
   WorkerCard,
   WorkerDetail,
   WorkerProfileDraft,
+  WorkerSelf,
   WorkerStatus,
   WsEvent,
   WsEventType,
@@ -87,6 +88,8 @@ export type WorkerPatch = Partial<Omit<NewWorker, "forPhone" | "years" | "rate" 
   years?: number;
   rate?: number;
   workingHours?: string;
+  /** Which trades of open jobs to show. At least one. */
+  feedCategoryIds?: string[];
 };
 
 export type NewCustomer = { name: string; area: string; address: string; location?: LatLng };

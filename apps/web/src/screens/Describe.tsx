@@ -12,6 +12,7 @@ import { useSettings } from "../lib/settings";
 import { Async } from "../ui/async";
 import { CategoryIcon } from "../ui/CategoryIcon";
 import { DurationPicker, JobPlaceRow, defaultSchedule, forgetProblem, problemDescription, recallProblem, rememberProblem, useJobPlace, type DescribeMode, type Schedule } from "../ui/hire";
+import { JobGuide, SampleNotice, SkillChips, jobGuideUsed, useSampleBox } from "../ui/JobGuide";
 import { AiTag, Auto, Button, Card, Chip, IconButton, InlineError, cx } from "../ui/primitives";
 import { Screen } from "../ui/shell";
 import { Asked } from "../ui/QuestionVoice";
@@ -49,6 +50,9 @@ export function Describe() {
   const [kept] = useState(recallProblem);
   const [mode, setMode] = useState<DescribeMode>(kept?.mode ?? "voice");
   const [text, setText] = useState(kept?.text ?? "");
+  const [extra, setExtra] = useState(kept?.extra ?? "");
+  const sampleBox = useSampleBox(text, setText);
+  const textBox = useRef<HTMLTextAreaElement>(null);
   const [photo, setPhoto] = useState<Blob | null>(kept?.photo ?? null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -76,8 +80,8 @@ export function Describe() {
   }, [photo]);
 
   useEffect(() => {
-    if (result) rememberProblem({ analysis: result, chosenCategory, schedule, text, photo, mode });
-  }, [result, chosenCategory, schedule, text, photo, mode]);
+    if (result) rememberProblem({ analysis: result, chosenCategory, schedule, text, photo, mode, extra });
+  }, [result, chosenCategory, schedule, text, photo, mode, extra]);
 
   useEffect(() => {
     if (!showResult.current || !result || busy) return;
@@ -91,6 +95,7 @@ export function Describe() {
     setFailure(null);
     setPostError(null);
     setResult(null);
+    setExtra("");
     setChangingTrade(false);
     forgetProblem();
     try {
@@ -102,6 +107,7 @@ export function Describe() {
         return;
       }
       setResult(analysis);
+      jobGuideUsed();
       setChosenCategory(null);
       setSchedule((current) => ({ ...current, durationDays: analysis.durationDays ?? 1 }));
       showResult.current = true;
@@ -141,8 +147,19 @@ export function Describe() {
   };
 
   const chooseMode = (next: DescribeMode) => {
+    // Off the voice path there is no stop button, so the microphone must not stay on.
+    if (recording && next !== "voice") void recorder.stop();
     setMode(next);
     setFailure(null);
+  };
+
+  /** Only fills the box. The customer changes it and sends it themselves. */
+  const fillSample = (words: string) => {
+    sampleBox.fill(words);
+    chooseMode("text");
+    cue("tap", audioCues);
+    // On the next frame, because on the voice and photo paths the box has only just appeared.
+    requestAnimationFrame(() => textBox.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
   };
 
   const removePhoto = () => {
@@ -157,6 +174,7 @@ export function Describe() {
     setChosenCategory(null);
     setChangingTrade(false);
     setText("");
+    setExtra("");
     setPhoto(null);
     setFailure(null);
     setPostError(null);
@@ -194,7 +212,7 @@ export function Describe() {
       const job = await data.createJob({
         mode: "open",
         categoryId,
-        description: problemDescription({ analysis: result, text }) || categoryName(category, lang),
+        description: problemDescription({ analysis: result, text, extra }) || categoryName(category, lang),
         area: jobPlace.place.area,
         location: jobPlace.place.location,
         urgency: result.urgency,
@@ -295,15 +313,17 @@ export function Describe() {
               </div>
             )}
             <textarea
+              ref={textBox}
               dir="auto"
               rows={3}
               maxLength={2000}
               value={text}
               onChange={(event) => setText(event.target.value)}
               aria-label={t("مسئلہ لکھیں", "Masla likhein", "Describe the problem")}
-              placeholder={t("جیسے: میرے گھر کا پنکھا نہیں چل رہا", "Jaise: mere ghar ka pankha nahi chal raha", "e.g. mere ghar ka pankha nahi chal raha")}
+              placeholder={t("کیا خراب ہے، کہاں، کب چاہیے، کتنے دن کا کام ہے؟ جیسے: نلکا ٹپک رہا ہے، جی ٹین، کل صبح", "Kya kharab hai, kahan, kab chahiye, kitne din ka kaam hai? Jaise: nalka tapak raha hai, G-10, kal subah", "What is wrong, where, when, how many days? e.g. tap is dripping, G-10, tomorrow morning")}
               className="field resize-none"
             />
+            <SampleNotice box={sampleBox} />
             <Button className="w-full" icon={busy ? LoaderCircle : Send} disabled={!text.trim() || busy} onClick={() => void analyze({ text: text.trim(), image: photo ?? undefined })}>
               {t("سمجھائیں", "Samjhayein", "Understand this")}
             </Button>
@@ -338,6 +358,16 @@ export function Describe() {
         </div>
       )}
 
+      {!result && !busy && (
+        <div className="mt-3">
+          <JobGuide
+            silenced={recording}
+            onSample={fillSample}
+            lead={mode === "voice" ? t("مائیک دبا کر یہ باتیں بتائیں", "Mic daba kar ye baatein batayein", "Tap the mic and say these things") : mode === "photo" ? t("خراب جگہ کی صاف تصویر لیں۔ مزید بتانا ہو تو لکھ کر بتائیں", "Kharab jagah ki saaf tasveer lein. Mazeed batana ho to likh kar batayein", "Take a clear photo of the problem. To say more, use Type") : t("یہ باتیں لکھیں", "Ye baatein likhein", "Write these things")}
+          />
+        </div>
+      )}
+
       {result && !busy && (
         <div ref={resultCard} className="mt-4 scroll-mt-20 animate-rise space-y-3">
           {quoted && (
@@ -346,6 +376,11 @@ export function Describe() {
               <p>
                 <Auto text={quoted} />
               </p>
+              {extra && (
+                <p className="text-sm font-semibold text-brand-700">
+                  + <Auto text={extra} />
+                </p>
+              )}
             </div>
           )}
 
@@ -422,6 +457,8 @@ export function Describe() {
                           key={c.id}
                           active={categoryId === c.id}
                           onClick={() => {
+                            // Skills added so far belonged to the trade being replaced.
+                            if (c.id !== categoryId) setExtra("");
                             setChosenCategory(c.id);
                             setChangingTrade(false);
                           }}
@@ -436,6 +473,8 @@ export function Describe() {
               </div>
             )}
           </Card>
+
+          {category && !changingTrade && <SkillChips category={category} text={extra} said={quoted ?? ""} onChange={setExtra} />}
 
           <Card>
             <DurationPicker value={schedule} onChange={setSchedule} />
