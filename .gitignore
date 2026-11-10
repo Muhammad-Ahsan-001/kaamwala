@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.turbo/
+*.log
+*.tsbuildinfo
+coverage/
+
+# Secrets: never commit
+.env
+.env.*
+!.env.example
+infra/deploy.env
+
+# Local uploads and test output
+apps/api/uploads/
+apps/web/dev-dist/
+playwright-report/
+test-results/

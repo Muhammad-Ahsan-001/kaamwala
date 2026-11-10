@@ -1,0 +1,21 @@
+# Local development database only. Port 5433 avoids the PostgreSQL already on 5432.
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: kaamwala-dev-db
+    environment:
+      POSTGRES_USER: kaamwala
+      POSTGRES_PASSWORD: kaamwala_dev_only
+      POSTGRES_DB: kaamwala
+    ports:
+      - "5433:5432"
+    volumes:
+      - kaamwala_dev_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kaamwala -d kaamwala"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  kaamwala_dev_db:
