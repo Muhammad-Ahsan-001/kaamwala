@@ -2,20 +2,9 @@
 
 A hyper-local marketplace connecting households in Islamabad and Rawalpindi with nearby skilled trade workers: electricians, plumbers, AC technicians, carpenters, mechanics, mistri, labourers, home maids, and any other category the admin adds. It is our answer to the Roshan Rozgar problem statement, and it is built for workers who may have limited literacy: Urdu first, voice first, large tap targets, and audio cues.
 
-> **Project status: in progress.** This README describes the intended product. The table below says what exists right now, and it is updated as work lands. Nothing is listed as done until it has been tested end to end.
+**Live demo:** https://kaamwala.avezea.com
 
-| Area | Status |
-|---|---|
-| Monorepo and shared API contract | Done |
-| Worker, customer and admin screens | In progress |
-| API, database, seed data | In progress |
-| Jev matching engine | In progress |
-| Live end-to-end flows | In progress |
-| Admin panel and category manager | In progress |
-| PWA, offline, push notifications | In progress |
-| Production deployment | Not deployed yet. Deployment scripts are in `infra/` |
-
-**Live demo:** not available yet.
+Sign-in codes are mocked and shown on screen. Demo accounts: customer `+923200000001`, worker `+923100000001`, admin `+923000000001` at `/admin`, field agent `+923000000002`.
 
 ## Features
 
@@ -44,7 +33,7 @@ pnpm install
 cp apps/api/.env.example apps/api/.env
 ```
 
-Edit `apps/api/.env` and set `JWT_SECRET` and `CNIC_SALT` to long random strings. Add a `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) for the AI features. Web Push needs VAPID keys, which you can generate with `npx web-push generate-vapid-keys`.
+Edit `apps/api/.env` and set `JWT_SECRET` and `CNIC_SALT` to long random strings. Add an `OPENAI_API_KEY` for the AI features, and optionally a `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) as a backup. Web Push needs VAPID keys, which you can generate with `npx web-push generate-vapid-keys`.
 
 Start the local database (Postgres in Docker, on port 5433), apply the schema, and load the demo data:
 
@@ -104,9 +93,17 @@ Jev takes raw text in Urdu script, Roman Urdu or English, and returns the best t
 
 ## AI services used
 
-All AI features use the **Google Gemini API** through the `@google/genai` SDK. The model is set by the `GEMINI_MODEL` environment variable, which defaults to `gemini-3.5-flash`. If it is overloaded or unavailable, the API falls back through `GEMINI_FALLBACK_MODELS` (`gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`).
+**OpenAI** is the main AI provider, and the **Google Gemini API** is an automatic backup if OpenAI cannot answer.
 
-| Feature | What Gemini does |
+| Job | OpenAI model | Backup |
+|---|---|---|
+| Urdu speech to text | `gpt-4o-transcribe` | `whisper-1`, then Gemini |
+| Understanding text, photos and documents, returning structured JSON | `gpt-5.4-mini` | `gpt-4.1-mini`, then Gemini (`gemini-3.5-flash`) |
+| Speaking Urdu aloud, for lines with no recording | `gpt-4o-mini-tts` | A real Urdu voice on the phone, if it has one |
+
+The pre-recorded question voices in `apps/web/public/voices/` were generated with `gpt-4o-mini-tts`. They are AI voices, not recordings of people. Each Urdu clip was checked by transcribing it and comparing it with its script.
+
+| Feature | What the AI does |
 |---|---|
 | Worker voice sign-up | Understands Urdu or Punjabi-Urdu speech, transcribes it, and returns a structured profile as JSON |
 | Customer problem description | Reads voice, text or a photo, and detects the trade, urgency and an estimated price range |
@@ -116,7 +113,7 @@ All AI features use the **Google Gemini API** through the `@google/genai` SDK. T
 | Job card | Generates the task, area, time and agreed price for both sides to confirm |
 | Reviews | Summarises a voice review into short trust tags such as "waqt ka paband" |
 
-Jev is not an AI service. It is local code, and every transcript and search also runs through it. Without Gemini, typed search and typed sign-up still work, but voice and photo understanding do not.
+Jev is not an AI service. It is local code that backs up typed text and powers search. With no AI provider, typed search and typed sign-up still work, but voice and photo understanding do not.
 
 ## AI coding assistants used
 
@@ -144,8 +141,9 @@ These parts are not real, and the product does not present them as real.
 - Keeping the screen awake uses the Screen Wake Lock API, which depends on browser support.
 - Web Push on iPhone works only after the app is installed to the home screen, on iOS 16.4 or later.
 - Voice recording, push notifications and installation need HTTPS and the user's permission.
-- Voice and photo understanding need the Gemini API and a network connection.
-- Map tiles come from the public OpenStreetMap servers, which suit a demo but not heavy production traffic.
+- Voice and photo understanding need an AI provider and a network connection.
+- Map tiles and place lookups come from the public OpenStreetMap and Nominatim services, which suit a demo but not heavy production traffic.
+- Places are matched within Islamabad and Rawalpindi only.
 - Live updates run in a single API process, so running more than one instance would need a shared message channel.
 
 ## Open-source libraries
@@ -198,5 +196,5 @@ Thanks to the authors of these projects. All project-specific code in this repos
 
 ### Services and data
 
-- Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, under the Open Database License.
+- Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, under the Open Database License. Place names and lookups come from [Nominatim](https://nominatim.org).
 - PostgreSQL, Caddy and Node.js run the production server.

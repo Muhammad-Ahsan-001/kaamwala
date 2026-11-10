@@ -18,6 +18,7 @@ import type {
   HirerDetail,
   Job,
   JobFeedItem,
+  LatLng,
   Message,
   NewCrew,
   NewCustomer,
@@ -154,6 +155,10 @@ export interface DataApi {
   analyzeProblem(input: ProblemInput): Promise<ProblemAnalysis>;
   /** The Urdu sentence to read back before a worker confirms. */
   readBackLine(draft: Partial<WorkerProfileDraft>): Promise<string>;
+  /** The name of the place at a point, such as a nearby sector. */
+  placeNear(point: LatLng): Promise<string>;
+  /** Looks up a named place in the twin cities. Null when it cannot be placed on the map. */
+  findPlace(text: string): Promise<(LatLng & { listed: boolean }) | null>;
   /** Spoken Urdu as an audio file, for lines that have no recording. Throws when it cannot be made. */
   speak(text: string): Promise<Blob>;
 

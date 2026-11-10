@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import type { OfflinePreset, WorkerCard } from "@kaamwala/contracts";
 import { significantWords, tokenize } from "@kaamwala/jev";
 import { Prisma, type WorkerProfile } from "@prisma/client";
-import { AREAS, findArea } from "../areas";
+import { AREAS } from "../areas";
+import { resolvePlace } from "../places";
 import type { AuthContext } from "../auth";
 import { normalizePhone } from "../auth";
 import { prisma } from "../db";
@@ -117,11 +118,10 @@ function resolveCategories(input: { categoryIds?: string[] | undefined; trade?: 
   return [best.categoryId];
 }
 
-function resolveLocation(area: string, location?: { lat: number; lng: number }) {
-  const known = findArea(area);
-  const point = location ?? known;
-  if (!point) throw unprocessable("LOCATION_REQUIRED", "Pick an area from the list or share your location.");
-  return { area: known?.name ?? area.trim(), lat: point.lat, lng: point.lng };
+async function resolveLocation(area: string, location?: { lat: number; lng: number }) {
+  const place = await resolvePlace(area, location);
+  if (!place) throw unprocessable("LOCATION_REQUIRED", "Pick an area from the list or share your location.");
+  return place;
 }
 
 function resolveSkills(input: WorkerInput | Partial<WorkerInput>, categoryIds: string[]): string[] {
@@ -137,7 +137,7 @@ export async function createWorker(auth: AuthContext, input: WorkerInput): Promi
   if (!isAgent && auth.user.role !== "worker") throw forbidden("Sign in as a worker first.");
 
   const categoryIds = resolveCategories(input);
-  const place = resolveLocation(input.area, input.location);
+  const place = await resolveLocation(input.area, input.location);
   const skills = resolveSkills(input, categoryIds);
   const defaultRate = Math.max(
     ...getActiveCategories()
@@ -222,7 +222,7 @@ export async function createWorker(auth: AuthContext, input: WorkerInput): Promi
 export async function updateWorker(worker: WorkerProfile, input: Partial<WorkerInput>, userId: string): Promise<WorkerCard> {
   const categoryIds =
     input.categoryIds?.length || input.trade ? resolveCategories(input) : worker.categoryIds;
-  const place = input.area ? resolveLocation(input.area, input.location) : null;
+  const place = input.area ? await resolveLocation(input.area, input.location) : null;
   const data: Prisma.WorkerProfileUpdateInput = {
     categoryIds,
     ...(input.skills || input.trade ? { skills: resolveSkills(input, categoryIds) } : {}),

@@ -1,9 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { findArea } from "../areas";
 import { authOf, requireAuth } from "../auth";
 import { prisma } from "../db";
 import { notFound } from "../errors";
+import { resolvePlace } from "../places";
 import { hirerCard, reviewInclude, toReviewView } from "../serialize";
 import { isOwnImageUrl } from "../uploads";
 
@@ -18,11 +18,11 @@ const CustomerBody = z.object(Fields);
 const CustomerPatch = CustomerBody.partial();
 
 /** Only what was sent changes, so editing one field never wipes another. */
-function profileData(body: z.infer<typeof CustomerPatch>) {
-  const known = body.area ? findArea(body.area) : null;
-  const point = body.location ?? known;
+async function profileData(body: z.infer<typeof CustomerPatch>) {
+  const place = body.area !== undefined || body.location ? await resolvePlace(body.area ?? "", body.location) : null;
+  const point = place ?? body.location;
   return {
-    ...(body.area !== undefined ? { area: known?.name ?? (body.area || null) } : {}),
+    ...(place ? { area: place.area } : body.area !== undefined ? { area: body.area || null } : {}),
     ...(point ? { lat: point.lat, lng: point.lng } : {}),
     ...(body.address !== undefined ? { address: body.address || null } : {}),
     ...(body.photoUrl !== undefined ? { photoUrl: body.photoUrl } : {}),
@@ -34,7 +34,7 @@ export async function customerRoutes(app: FastifyInstance) {
   app.post("/customers", { preHandler: requireAuth }, async (req, reply) => {
     const { user } = authOf(req);
     const body = CustomerBody.parse(req.body);
-    const data = profileData(body);
+    const data = await profileData(body);
     await prisma.$transaction([
       prisma.user.update({ where: { id: user.id }, data: { name: body.name } }),
       prisma.hirerProfile.upsert({ where: { userId: user.id }, create: { userId: user.id, ...data }, update: data }),
@@ -45,7 +45,7 @@ export async function customerRoutes(app: FastifyInstance) {
   app.patch("/customers/me", { preHandler: requireAuth }, async (req) => {
     const { user } = authOf(req);
     const body = CustomerPatch.parse(req.body);
-    const data = profileData(body);
+    const data = await profileData(body);
     await prisma.$transaction([
       ...(body.name ? [prisma.user.update({ where: { id: user.id }, data: { name: body.name } })] : []),
       prisma.hirerProfile.upsert({ where: { userId: user.id }, create: { userId: user.id, ...data }, update: data }),

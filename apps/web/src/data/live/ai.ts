@@ -27,8 +27,10 @@ function fieldValue(field: OnboardField, draft: WorkerProfileDraft): string {
   }
 }
 
-export const aiApi: Pick<DataApi, "transcribeOnboarding" | "transcribeField" | "transcribeCustomer" | "analyzeProblem" | "readBackLine" | "speak"> = {
+export const aiApi: Pick<DataApi, "transcribeOnboarding" | "transcribeField" | "transcribeCustomer" | "analyzeProblem" | "readBackLine" | "speak" | "placeNear" | "findPlace"> = {
   speak: (text) => requestBlob("/ai/speak", { text }),
+  placeNear: async ({ lat, lng }) => (await request<{ name: string }>("GET", `/places/near?lat=${lat}&lng=${lng}`)).name,
+  findPlace: async (text) => (await request<{ place: { lat: number; lng: number; listed: boolean } | null }>("GET", `/places/find?q=${encodeURIComponent(text)}`)).place,
 
   transcribeOnboarding: async (audio, field) => {
     const draft = await readDraft(audioForm(audio, field ? { field } : {}));

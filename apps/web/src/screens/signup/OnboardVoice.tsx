@@ -313,7 +313,7 @@ export function OnboardVoice() {
                         <span className="text-sm font-normal text-faint">{row.hint ?? "—"}</span>
                       )}
                     </div>
-                    {invalid && row.field === "area" && worker.area && <p className="text-sm font-bold text-busy-700">{t("فہرست سے علاقہ چنیں", "List se ilaqa chunein", "Please pick it from the list")}</p>}
+                    {invalid && row.field === "area" && worker.area && <p className="text-sm font-bold text-busy-700">{t("یہ جگہ نقشے پر نہیں ملی۔ سیکٹر بتائیں یا اپنی موجودہ جگہ دیں۔", "Ye jagah naqshe par nahi mili. Sector batayein ya apni maujooda jagah dein.", "We could not find this on the map. Say your sector or share your current location.")}</p>}
                   </div>
                   <IconButton
                     icon={listeningHere ? Square : Mic}

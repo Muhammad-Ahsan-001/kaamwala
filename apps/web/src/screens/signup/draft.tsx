@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { Area, LatLng, OnboardField, WorkerProfileDraft } from "../../data";
+import { data, type Area, type LatLng, type OnboardField, type WorkerProfileDraft } from "../../data";
 import { useSession } from "../../lib/session";
 import { isValidName, isValidRate, isValidYears, toLatinDigits } from "../../lib/validate";
 
@@ -87,6 +87,38 @@ export function DraftProvider({ children }: { children: ReactNode }) {
     if (!userId) return;
     setState((s) => (s.owner === userId ? s : s.owner === null ? { ...s, owner: userId } : blank(userId)));
   }, [userId]);
+
+  // A place that is not on the list can still be on the map, so nobody is told to pick from a list for no reason.
+  const workerArea = state.worker.location ? "" : state.worker.area.trim();
+  const customerArea = state.customer.location ? "" : state.customer.area.trim();
+  useEffect(() => {
+    if (!userId || !workerArea) return;
+    const timer = setTimeout(() => {
+      void data
+        .findPlace(workerArea)
+        .then((found) => {
+          if (!found || found.listed) return;
+          const location = { lat: found.lat, lng: found.lng };
+          setState((s) => (s.worker.area.trim() === workerArea && !s.worker.location ? { ...s, worker: { ...s.worker, location } } : s));
+        })
+        .catch(() => undefined);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [userId, workerArea]);
+  useEffect(() => {
+    if (!userId || !customerArea) return;
+    const timer = setTimeout(() => {
+      void data
+        .findPlace(customerArea)
+        .then((found) => {
+          if (!found || found.listed) return;
+          const location = { lat: found.lat, lng: found.lng };
+          setState((s) => (s.customer.area.trim() === customerArea && !s.customer.location ? { ...s, customer: { ...s.customer, location } } : s));
+        })
+        .catch(() => undefined);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [userId, customerArea]);
 
   // Kept across a reload, so moving between voice and typing never loses input.
   useEffect(() => {

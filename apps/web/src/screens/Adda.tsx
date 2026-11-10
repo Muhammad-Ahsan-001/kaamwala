@@ -139,7 +139,15 @@ export function Adda() {
         setGps("idle");
         // The customer chose an area while this was still looking, and that choice stands.
         if (pickedByHand.current) return;
-        setOrigin({ center: { lat: position.coords.latitude, lng: position.coords.longitude }, kind: "gps", label: null });
+        const center = { lat: position.coords.latitude, lng: position.coords.longitude };
+        setOrigin({ center, kind: "gps", label: null });
+        // The map works at once. The place name follows when it arrives.
+        void data
+          .placeNear(center)
+          .then((label) => {
+            if (!pickedByHand.current) setOrigin({ center, kind: "gps", label });
+          })
+          .catch(() => undefined);
       },
       (error) => setGps(error.code === error.PERMISSION_DENIED ? "blocked" : "failed"),
       { timeout: GPS_TIMEOUT_MS, maximumAge: GPS_MAX_AGE_MS },
@@ -203,7 +211,7 @@ export function Adda() {
   const whereText =
     gps === "asking" && !origin
       ? t("آپ کی جگہ ڈھونڈ رہے ہیں…", "Aap ki jagah dhoond rahe hain…", "Finding your location…")
-      : origin?.kind === "gps"
+      : origin?.kind === "gps" && !originName
         ? t("آپ کی جگہ کے قریب", "Aap ki jagah ke qareeb", "Near your location")
         : originName
           ? t(`${originName} کے قریب`, `${originName} ke qareeb`, `Near ${originName}`)

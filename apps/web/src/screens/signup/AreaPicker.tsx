@@ -4,7 +4,7 @@ import { data, type Area, type LatLng } from "../../data";
 import { useData } from "../../lib/useData";
 import { useSettings, type Lang } from "../../lib/settings";
 import { Button, Chip, InlineError, Skeleton } from "../../ui/primitives";
-import { areaMatches, sameArea } from "./draft";
+import { areaIsKnown, areaMatches, sameArea } from "./draft";
 import { TextWithMic } from "./parts";
 
 let loading: Promise<Area[]> | null = null;
@@ -25,8 +25,6 @@ export function useAreas() {
 /** Sector codes such as G-9 are read the same way in both scripts. */
 const areaLabel = (area: Area, lang: Lang) => (lang === "ur" && !/^[A-Z]-\d+$/.test(area.name) ? area.nameUr : area.name);
 
-const MAX_DISTANCE_KM = 50;
-
 function kmBetween(a: LatLng, b: LatLng): number {
   const rad = (deg: number) => (deg * Math.PI) / 180;
   const dLat = rad(b.lat - a.lat);
@@ -44,7 +42,7 @@ function nearest(point: LatLng, areas: Area[]): { area: Area; km: number } | nul
   return best;
 }
 
-type GpsState = "idle" | "working" | "failed" | "far";
+type GpsState = "idle" | "working" | "failed";
 
 /** Type or say an area, choose it from the real list, or share GPS. Always ends somewhere the server can place. */
 export function AreaPicker({
@@ -78,16 +76,15 @@ export function AreaPicker({
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
         const point = { lat: coords.latitude, lng: coords.longitude };
-        const closest = nearest(point, list);
-        if (closest && closest.km > MAX_DISTANCE_KM) {
-          setGps("far");
-          return;
-        }
-        setGps("idle");
-        onChange({ area: query || closest?.area.name || "", location: point });
+        // A sector they named stays. Anything vaguer, like "Islamabad", gives way to where they really are.
+        const named = query && areaIsKnown(query, list) ? query : null;
+        void (named ? Promise.resolve(named) : data.placeNear(point).catch(() => nearest(point, list)?.area.name ?? "")).then((area) => {
+          setGps("idle");
+          onChange({ area, location: point });
+        });
       },
       () => setGps("failed"),
-      { enableHighAccuracy: false, timeout: 12_000, maximumAge: 60_000 },
+      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 60_000 },
     );
   };
 
@@ -123,17 +120,14 @@ export function AreaPicker({
       {location && (
         <p className="mt-1 flex items-center gap-1 text-sm font-bold text-brand-700">
           <CircleCheck className="h-4 w-4 shrink-0" aria-hidden />
-          {t("آپ کی جگہ لے لی گئی", "Aapki jagah le li gayi", "Your location was added")}
+          <span>
+            {t("آپ کی جگہ لے لی گئی:", "Aapki jagah le li gayi:", "Your location was added:")} <bdi>{value}</bdi>
+          </span>
         </p>
       )}
       {gps === "failed" && (
         <div className="mt-2">
           <InlineError>{t("جگہ نہیں مل سکی۔ فہرست سے علاقہ چنیں۔", "Jagah nahi mil saki. List se ilaqa chunein.", "Could not get your location. Please pick an area from the list.")}</InlineError>
-        </div>
-      )}
-      {gps === "far" && (
-        <div className="mt-2">
-          <InlineError>{t("آپ اسلام آباد یا راولپنڈی سے باہر لگتے ہیں۔ فہرست سے علاقہ چنیں۔", "Aap Islamabad ya Rawalpindi se bahar lagte hain. List se ilaqa chunein.", "You seem to be outside Islamabad and Rawalpindi. Please pick an area from the list.")}</InlineError>
         </div>
       )}
     </div>

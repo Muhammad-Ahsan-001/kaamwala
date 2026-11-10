@@ -17,6 +17,7 @@ import { aiUnavailable, badRequest, forbidden, notFound, unprocessable } from ".
 import { GeminiUnavailable, readCnic, skillsFromPhoto } from "../gemini";
 import { addDaysIso, startOfDayPkt, startOfWeekPkt, todayPkt } from "../geo";
 import { getActiveCategories, jev } from "../jev";
+import { findPlace, placeNear } from "../places";
 import { reviewInclude, toEarning, toPastWork, toReviewView, workerCard } from "../serialize";
 import { documentForAi, isOwnImageUrl, readBody, saveImage } from "../uploads";
 
@@ -69,6 +70,16 @@ async function targetWorkerId(req: FastifyRequest): Promise<string> {
 
 export async function workerRoutes(app: FastifyInstance) {
   app.get("/areas", async () => ({ items: listAreas() }));
+
+  app.get("/places/near", { preHandler: requireAuth, config: aiLimit }, async (req) => {
+    const point = z.object({ lat: z.coerce.number().min(-90).max(90), lng: z.coerce.number().min(-180).max(180) }).parse(req.query);
+    return { name: await placeNear(point) };
+  });
+
+  app.get("/places/find", { preHandler: requireAuth, config: aiLimit }, async (req) => {
+    const { q } = z.object({ q: z.string().trim().min(2).max(120) }).parse(req.query);
+    return { place: await findPlace(q) };
+  });
 
   app.get("/workers", async (req) => searchWorkers(SearchQuery.parse(req.query)));
 
