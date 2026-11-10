@@ -117,7 +117,7 @@ if [[ "$RUN_SETUP" -eq 1 ]]; then
   remote "$REMOTE_SUDO env DOMAIN='$DOMAIN' CADDY_MAIN_FILE='$CADDY_MAIN_FILE' bash '$REMOTE_TMP/first-time-setup.sh'"
 
   echo
-  echo "Setup finished. Next: follow infra/DEPLOY.md to add the API keys, then run: bash deploy.sh --seed"
+  echo "Setup finished. Next: add the API keys to /etc/kaamwala/api.env on the droplet, then run: bash deploy.sh --seed"
   exit 0
 fi
 

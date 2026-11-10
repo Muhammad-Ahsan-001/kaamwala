@@ -22,6 +22,7 @@ A hyper-local marketplace connecting households in Islamabad and Rawalpindi with
 - **Sign-up by voice or by typing.** A worker can speak their details (name, trade, experience, area, rate, working hours) and have the profile filled in and read back, or choose to type every field instead, in Urdu, Roman Urdu or English.
 - **Discovery.** Customers describe a problem by voice, Roman Urdu text or photo, and see available nearby workers on a map and in a list.
 - **Two ways to hire.** Pick a worker directly, or publish an open job and receive offers.
+- **Multi-day hiring.** Book a worker or crew for up to 30 days at a per-day price, track progress day by day, and finish early paying only for completed days.
 - **Fair price negotiation.** Price buttons move in a fixed step set by the admin and never go below the category's floor price. Voice notes in both directions carry automatic transcripts.
 - **Reliable booking.** Accepting a job runs in one database transaction with a row lock, so a worker can never hold two active jobs. Status updates reach every client live over WebSockets.
 - **Availability control.** One big toggle with time presets. A busy worker disappears from search and the map.
@@ -76,7 +77,15 @@ Other useful commands:
 | `pnpm build` | Build everything |
 | `pnpm db:down` | Stop the local database |
 
-Production deployment is documented in [infra/DEPLOY.md](infra/DEPLOY.md).
+## Deployment
+
+KaamWala runs on a DigitalOcean droplet next to other apps, at `kaamwala.avezea.com` (web) and `api.kaamwala.avezea.com` (API). The scripts add only KaamWala's own Postgres database, its `kaamwala-api` systemd service on private port 3002, and its Caddy site blocks. Nothing else on the server is changed or restarted.
+
+1. In Namecheap's Advanced DNS for `avezea.com`, add A records for `kaamwala` and `api.kaamwala` pointing to the droplet's IP.
+2. Copy `infra/deploy.env.example` to `infra/deploy.env` and set the droplet host, SSH user and domain. SSH must work with a key, as root or a passwordless-sudo user.
+3. Run `bash deploy.sh --setup` once.
+4. On the droplet, add `GEMINI_API_KEY`, `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` to `/etc/kaamwala/api.env`.
+5. Run `bash deploy.sh --seed` for the first deploy, and `bash deploy.sh` after that.
 
 ## Tech stack
 
@@ -130,6 +139,7 @@ These parts are not real, and the product does not present them as real.
 ## Known limitations
 
 - There is no NADRA or other government identity verification. It is out of scope.
+- A worker is busy from booking confirmation until the job ends, even if the start date is a few days away. This is what guarantees no double-booking, and it means there is no calendar-style booking around other jobs.
 - Browsers cannot set a device's screen brightness. Sunlight mode only switches to a maximum-contrast palette with larger text.
 - Keeping the screen awake uses the Screen Wake Lock API, which depends on browser support.
 - Web Push on iPhone works only after the app is installed to the home screen, on iOS 16.4 or later.
