@@ -3,7 +3,7 @@
 # KaamWala deploy. Run from Git Bash or any Linux/macOS shell:
 #
 #   bash deploy.sh --setup      prepare the one-time server setup (run this first, once)
-#   bash deploy.sh --push-env   copy the Gemini and push keys from apps/api/.env to the server
+#   bash deploy.sh --push-env   copy the AI and push keys from apps/api/.env to the server
 #   bash deploy.sh              build, upload, migrate, restart kaamwala-api
 #   bash deploy.sh --seed       same, and load the demo seed data as well
 #
@@ -143,7 +143,7 @@ if [[ "$RUN_PUSH_ENV" -eq 1 ]]; then
   [[ -f apps/api/.env ]] || die "Missing apps/api/.env"
   step "Copying the Gemini and push keys to the droplet"
   tr -d '\r' <apps/api/.env |
-    grep -E '^(GEMINI_API_KEY|GEMINI_MODEL|GEMINI_FALLBACK_MODELS|VAPID_PUBLIC_KEY|VAPID_PRIVATE_KEY)=' |
+    grep -E '^(OPENAI_API_KEY|OPENAI_MODEL|OPENAI_FALLBACK_MODELS|OPENAI_TRANSCRIBE_MODEL|OPENAI_TRANSCRIBE_FALLBACK_MODELS|OPENAI_REASONING_EFFORT|GEMINI_API_KEY|GEMINI_MODEL|GEMINI_FALLBACK_MODELS|VAPID_PUBLIC_KEY|VAPID_PRIVATE_KEY)=' |
     remote "$REMOTE_CTL set-env"
   echo "Done. The values were not printed."
   exit 0
