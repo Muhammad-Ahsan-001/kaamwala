@@ -18,7 +18,7 @@ import { GeminiUnavailable, readCnic, skillsFromPhoto } from "../gemini";
 import { startOfDayPkt, startOfWeekPkt } from "../geo";
 import { getActiveCategories, jev } from "../jev";
 import { toEarning, toReview, workerCard } from "../serialize";
-import { imageForAi, readBody, saveImage } from "../uploads";
+import { imageForAi, isOwnImageUrl, readBody, saveImage } from "../uploads";
 
 const aiLimit = { rateLimit: { max: env.RATE_LIMIT_AI_PER_MIN, timeWindow: "1 minute" } };
 
@@ -34,7 +34,7 @@ const WorkerFields = {
   rate: z.number().int().min(0).max(1_000_000).optional(),
   location: Location.optional(),
   workingHours: z.string().trim().max(120).optional(),
-  photoUrl: z.string().url().optional(),
+  photoUrl: z.string().url().refine(isOwnImageUrl, { message: "Upload the photo first." }).optional(),
 };
 
 const CreateWorker = z.object({ ...WorkerFields, forPhone: z.string().optional(), cnic: z.string().max(20).optional() }).refine(
@@ -135,8 +135,7 @@ export async function workerRoutes(app: FastifyInstance) {
       const image = body.images[0];
       if (!image) throw badRequest("CNIC_REQUIRED", "Attach a CNIC photo or type the number.");
       try {
-        const data = await imageForAi(image.data);
-        const read = await readCnic({ data, mimetype: "image/jpeg" });
+        const read = await readCnic(await imageForAi(image.data));
         digits = read.cnic ? cleanCnic(read.cnic) : null;
       } catch (err) {
         if (!(err instanceof GeminiUnavailable)) throw err;

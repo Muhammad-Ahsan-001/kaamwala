@@ -4,7 +4,8 @@ import { prisma, type Tx } from "../db";
 import { conflict, notFound } from "../errors";
 import { hub } from "../hub";
 import { pushToUsers, type PushPayload } from "../push";
-import { jobInclude, offerInclude, toJob, toOffers, type JobFull } from "../serialize";
+import { jobInclude, offerInclude, toJob, toOffers, toOpenJobView, type JobFull } from "../serialize";
+import { openJobRecipients } from "./openJobs";
 
 const TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
 
@@ -54,18 +55,24 @@ async function publishJob(jobId: string): Promise<void> {
     include: {
       ...jobInclude,
       assignments: { select: { workerId: true, active: true, worker: { select: { userId: true } } } },
-      offers: { select: { worker: { select: { userId: true } } } },
+      offers: { where: { status: "pending" }, select: { worker: { select: { userId: true } } } },
     },
   });
   if (!job) return;
-  const event: WsEvent = { type: "job.updated", job: toJob(job) };
-  const audience = [
-    job.customerId,
-    ...job.assignments.map((a) => a.worker.userId),
+  const parties = [job.customerId, ...job.assignments.map((a) => a.worker.userId)];
+  hub.toUsers(parties, { type: "job.updated", job: toJob(job) });
+  if (job.status !== "open") return;
+
+  // Everyone else gets the reduced view, and only if this job is meant for them.
+  // The role check is the database's: an account now signed in as a customer is out of the feed.
+  const recipients = await openJobRecipients(job);
+  const bidders = new Set([
+    ...recipients.filter((r) => r.role === "worker").map((r) => r.userId),
     ...job.offers.map((o) => o.worker.userId),
-  ];
-  if (job.status === "open") hub.toWorkers(event, audience);
-  else hub.toUsers(audience, event);
+  ]);
+  for (const party of parties) bidders.delete(party);
+  const reduced: WsEvent = { type: "job.updated", job: toOpenJobView(job) };
+  hub.toUsersOnly(bidders, reduced);
 }
 
 async function publishOffer(id: string, type: "offer.created" | "offer.updated"): Promise<void> {
@@ -103,6 +110,20 @@ export async function lockJob(tx: Tx, id: string): Promise<JobFull> {
   const job = await tx.job.findUnique({ where: { id }, include: jobInclude });
   if (!job) throw notFound("Job");
   return job;
+}
+
+/**
+ * Serialises everything that reads a crew's members and then books them, so a member cannot
+ * leave between the read and the booking. Lock order is job, then crew, then workers.
+ */
+export async function lockCrew(tx: Tx, id: string) {
+  await tx.$queryRaw`SELECT id FROM "Crew" WHERE id = ${id} FOR NO KEY UPDATE`;
+  const crew = await tx.crew.findUnique({
+    where: { id },
+    include: { members: { where: { status: "accepted" }, include: { worker: { select: { userId: true } } } } },
+  });
+  if (!crew) throw notFound("Crew");
+  return crew;
 }
 
 export interface LockedWorker {

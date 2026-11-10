@@ -27,6 +27,13 @@ const schema = z.object({
   OPEN_JOB_RADIUS_KM: z.coerce.number().default(15),
   RATE_LIMIT_AUTH_PER_MIN: z.coerce.number().default(30),
   RATE_LIMIT_AI_PER_MIN: z.coerce.number().default(30),
+  RATE_LIMIT_JOBS_PER_MIN: z.coerce.number().default(60),
+  RATE_LIMIT_UPLOADS_PER_MIN: z.coerce.number().default(30),
+  RATE_LIMIT_CREWS_PER_MIN: z.coerce.number().default(30),
+  /** A request nobody has answered is cancelled after this, so it cannot hold a worker forever. */
+  REQUEST_EXPIRY_MINUTES: z.coerce.number().positive().default(30),
+  /** A negotiation with no price move or message for this long is cancelled. */
+  NEGOTIATION_EXPIRY_MINUTES: z.coerce.number().positive().default(720),
 });
 
 export const env = schema.parse(process.env);

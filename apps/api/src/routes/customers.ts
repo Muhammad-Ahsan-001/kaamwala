@@ -5,12 +5,13 @@ import { authOf, requireAuth } from "../auth";
 import { prisma } from "../db";
 import { notFound } from "../errors";
 import { hirerCard } from "../serialize";
+import { isOwnImageUrl } from "../uploads";
 
 const CustomerBody = z.object({
   name: z.string().trim().min(2).max(80),
   area: z.string().trim().max(120).optional(),
   location: z.object({ lat: z.number(), lng: z.number() }).optional(),
-  photoUrl: z.string().url().optional(),
+  photoUrl: z.string().url().refine(isOwnImageUrl, { message: "Upload the photo first." }).optional(),
 });
 
 export async function customerRoutes(app: FastifyInstance) {

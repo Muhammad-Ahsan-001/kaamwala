@@ -403,3 +403,165 @@ describe("helpers", () => {
     expect(editDistance("", "abc")).toBe(3);
   });
 });
+
+describe("function words are not trades", () => {
+  const socket: JevCategory = { id: "socket", nameUr: "", nameRoman: "aaa", nameEn: "Aaa", keywords: ["socket"], skills: [] };
+  const roof: JevCategory = { id: "roof", nameUr: "", nameRoman: "bbb", nameEn: "Bbb", keywords: ["chhat"], skills: [] };
+  const goods: JevCategory = { id: "goods", nameUr: "", nameRoman: "ccc", nameEn: "Ccc", keywords: ["saman"], skills: [] };
+  const wires: JevCategory = { id: "wires", nameUr: "", nameRoman: "ddd", nameEn: "Ddd", keywords: ["wiring"], skills: [] };
+  const food: JevCategory = { id: "food", nameUr: "", nameRoman: "eee", nameEn: "Eee", keywords: ["khana"], skills: [] };
+  const jev = new Jev([socket, roof, goods, wires, food]);
+
+  it.each([
+    "kya aap kal aa sakte hain",
+    "کیا آپ کل آ سکتے ہیں",
+    "kya koi aa sakta hai",
+    "aaj chutti hai",
+    "چھوٹا سا کام ہے",
+    "میرے گھر کے سامنے",
+    "someone will call",
+    "wrong number",
+    "Imran Khan",
+    "کچھ کہنا ہے",
+  ])("%s matches nothing", (text) => {
+    expect(jev.match(text).best).toBeNull();
+  });
+
+  it("does not need a stop word to tell apart words that share consonants", () => {
+    // None of these spellings is on the stop list.
+    expect(jev.match("sakten").best).toBeNull();
+    expect(jev.match("chuttian").best).toBeNull();
+    expect(jev.match("samni").best).toBeNull();
+    expect(jev.match("سکتیں").best).toBeNull();
+  });
+
+  it("still accepts a word with its vowels dropped", () => {
+    expect(bestId(jev, "skt")).toBe("socket");
+    expect(bestId(jev, "smn")).toBe("goods");
+  });
+
+  it("still links a Roman keyword to its Urdu spelling", () => {
+    expect(bestId(jev, "چھت")).toBe("roof");
+    expect(bestId(jev, "کھانا")).toBe("food");
+  });
+
+  it("treats e and i, and o and u, as the same vowel", () => {
+    const meter: JevCategory = { id: "m", nameUr: "", nameRoman: "fff", nameEn: "Fff", keywords: ["meter", "kursi"], skills: [] };
+    expect(bestId(new Jev([meter]), "میٹر")).toBe("m");
+    expect(bestId(new Jev([meter]), "کرسی")).toBe("m");
+  });
+});
+
+describe("ties", () => {
+  it("names no winner when two trades tie exactly", () => {
+    const a: JevCategory = { id: "a", nameUr: "", nameRoman: "aaa", nameEn: "Aaa", keywords: ["gasket"], skills: [] };
+    const b: JevCategory = { id: "b", nameUr: "", nameRoman: "bbb", nameEn: "Bbb", keywords: ["gasket"], skills: [] };
+    const result = new Jev([a, b]).match("gasket");
+    expect(result.matches).toHaveLength(2);
+    expect(result.best).toBeNull();
+  });
+
+  it("still names a winner when one trade has more evidence", () => {
+    const a: JevCategory = { id: "a", nameUr: "", nameRoman: "aaa", nameEn: "Aaa", keywords: ["gasket", "valve"], skills: [] };
+    const b: JevCategory = { id: "b", nameUr: "", nameRoman: "bbb", nameEn: "Bbb", keywords: ["gasket"], skills: [] };
+    expect(new Jev([a, b]).match("gasket valve").best?.categoryId).toBe("a");
+  });
+});
+
+describe("English word endings", () => {
+  const paint: JevCategory = { id: "paint", nameUr: "", nameRoman: "aaa", nameEn: "Painter", keywords: ["paint"], skills: [] };
+  const water: JevCategory = { id: "water", nameUr: "", nameRoman: "bbb", nameEn: "Bbb", keywords: ["leak"], skills: [] };
+  const clean: JevCategory = { id: "clean", nameUr: "", nameRoman: "ccc", nameEn: "Ccc", keywords: ["cleaning"], skills: [] };
+  const power: JevCategory = { id: "power", nameUr: "", nameRoman: "ddd", nameEn: "Ddd", keywords: ["electric", "breaker"], skills: [] };
+  const jev = new Jev([paint, water, clean, power]);
+
+  it.each([
+    ["need painting done", "paint"],
+    ["painted the wall", "paint"],
+    ["the sink is leaking", "water"],
+    ["two leaks", "water"],
+    ["need a cleaner", "clean"],
+    ["cleaners required", "clean"],
+    ["no electricity at home", "power"],
+  ])("%s -> %s", (text, id) => {
+    expect(bestId(jev, text)).toBe(id);
+  });
+
+  it("does not read breaking as a breaker", () => {
+    expect(jev.match("my screen is breaking").best).toBeNull();
+  });
+
+  it("leaves short words alone", () => {
+    expect(jev.match("the gas is on").best).toBeNull();
+  });
+});
+
+describe("hostile input", () => {
+  it("reads a profile quickly however the spaces are arranged", () => {
+    const started = Date.now();
+    engine.parseProfile(`d${" ".repeat(200_000)}x`);
+    engine.parseProfile(`g${"- ".repeat(100_000)}x`);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it("caps how much text one call will read", () => {
+    const started = Date.now();
+    const result = engine.match("bijlx ".repeat(200_000));
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(result.tokens.length).toBeLessThanOrEqual(4000);
+  });
+
+  it("still reads a sector with a space or hyphen after the limits were added", () => {
+    expect(engine.parseProfile("g 10/2").area).toBe("G-10/2");
+    expect(engine.parseProfile("G-9 mein").area).toBe("G-9");
+    expect(engine.parseProfile("f - 7").area).toBe("F-7");
+  });
+});
+
+describe("parseField", () => {
+  it("takes a bare number as the years asked about", () => {
+    expect(engine.parseField("پانچ", "years").years).toBe(5);
+    expect(engine.parseField("paanch", "years").years).toBe(5);
+    expect(engine.parseField("12", "years").years).toBe(12);
+  });
+
+  it("prefers a stated unit", () => {
+    expect(engine.parseField("mujhe 7 saal ho gaye", "years").years).toBe(7);
+  });
+
+  it("takes a bare amount as the rate", () => {
+    expect(engine.parseField("1500", "rate").rate).toBe(1500);
+    expect(engine.parseField("pandra sau", "rate").rate).toBe(1500);
+  });
+
+  it("takes a short reply as the name", () => {
+    expect(engine.parseField("bilal ahmed", "name").name).toBe("Bilal Ahmed");
+    expect(engine.parseField("علی رضا", "name").name).toBe("علی رضا");
+  });
+
+  it("does not take a sentence as a name", () => {
+    expect(engine.parseField("yeh aik bohat lamba jumla hai bhai", "name").name).toBeNull();
+  });
+
+  it("fills only the field asked about", () => {
+    expect(engine.parseField("1500", "years")).toEqual({ name: null, years: null, rate: null, area: null });
+  });
+});
+
+describe("words that say how long something has been broken", () => {
+  it.each([
+    ["3 din se pankha kharab hai"],
+    ["پچھلے دو دن سے پنکھا خراب ہے"],
+    ["ek hafte se nalka tapak raha hai"],
+    ["pichle teen din"],
+    ["for the last 3 days"],
+    ["since 2 days"],
+    ["3din se band hai"],
+  ])("%s is not a booking length", (text) => {
+    expect(extractDurationDays(text)).toBeNull();
+  });
+
+  it("still finds the real duration beside one", () => {
+    expect(extractDurationDays("2 din se kharab hai, teen din ka kaam hai")).toBe(3);
+  });
+});

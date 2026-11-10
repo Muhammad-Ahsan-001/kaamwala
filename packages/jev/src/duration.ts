@@ -9,8 +9,25 @@ const MONTH_UNITS = wordSet(["mahina", "mahine", "mahinay", "maheena", "month", 
 const ENGLISH_UNITS = new Set(["day", "days", "week", "weeks", "month", "months"]);
 
 /** "do din baad" says when the work happens, not how long it lasts. */
-const NOT_A_DURATION = wordSet(["baad", "bad", "later", "after", "pehle", "ago", "بعد", "پہلے"]);
-const OPENS_A_DATE = new Set(["after", "in"]);
+const NOT_A_DURATION = wordSet(["baad", "bad", "later", "after", "pehle", "ago", "se", "since", "بعد", "پہلے", "سے"]);
+/** "pichle do din" and "for the last 3 days" look back, so they say how long it has been broken. */
+const OPENS_A_DATE = wordSet([
+  "after",
+  "in",
+  "since",
+  "last",
+  "past",
+  "pichle",
+  "pichhle",
+  "pichla",
+  "pichhla",
+  "pichli",
+  "pichhli",
+  "پچھلے",
+  "پچھلا",
+  "پچھلی",
+  "گزشتہ",
+]);
 const FILLERS = wordSet(["poore", "pure", "pooray", "full", "whole", "مکمل", "پورے"]);
 
 const inRange = (days: number) => days >= 1 && days <= MAX_DAYS;

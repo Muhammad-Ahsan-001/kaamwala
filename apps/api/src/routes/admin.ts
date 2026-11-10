@@ -3,9 +3,11 @@ import { z } from "zod";
 import { JobStatus, type AgentLedgerEntry, type AgentLedgerSummary } from "@kaamwala/contracts";
 import { normalizePhone, requireRole } from "../auth";
 import { prisma } from "../db";
+import { suspendWorker } from "../domain/jobs";
 import { lockJob, lockWorkers, runTx, setStatus } from "../domain/tx";
 import { conflict, notFound } from "../errors";
 import { startOfDayPkt } from "../geo";
+import { CLOSE_SUSPENDED, hub } from "../hub";
 import { jobInclude, toJob, workerCards } from "../serialize";
 
 const Id = z.object({ id: z.string() });
@@ -70,18 +72,9 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.post("/admin/workers/:id/suspend", admin, async (req) => {
     const { id } = Id.parse(req.params);
-    await runTx(async (tx, fx) => {
-      const worker = await tx.workerProfile.findUnique({ where: { id } });
-      if (!worker) throw notFound("Worker");
-      const [locked] = await lockWorkers(tx, [id]);
-      if (locked?.status === "requested" || locked?.status === "engaged") {
-        throw conflict("WORKER_ENGAGED", "This worker has an active job. Resolve it first.");
-      }
-      await tx.workerProfile.update({ where: { id }, data: { approved: false } });
-      await tx.user.update({ where: { id: worker.userId }, data: { suspended: true } });
-      await setStatus(tx, fx, [id], "offline");
-    });
-    return { ok: true };
+    const { userId, endedJobId } = await suspendWorker(id);
+    hub.disconnectUser(userId, CLOSE_SUSPENDED, "suspended");
+    return { ok: true, endedJobId };
   });
 
   app.get("/admin/jobs", admin, async (req) => {
@@ -112,9 +105,20 @@ export async function adminRoutes(app: FastifyInstance) {
     const job = await runTx(async (tx, fx) => {
       const locked = await lockJob(tx, id);
       if (locked.status !== "disputed") throw conflict("INVALID_JOB_STATE", "This job is not in dispute.");
+      // Days already worked were paid, so a job with any of them finished, however it ended.
+      const worked = locked.days.filter((d) => d.status === "completed");
+      const finishedDuringDispute = !locked.completedAt && worked.length > 0;
+      const lastWorked = worked.reduce<Date | null>(
+        (latest, d) => (d.completedAt && (!latest || d.completedAt > latest) ? d.completedAt : latest),
+        null,
+      );
       const updated = await tx.job.update({
         where: { id },
-        data: { disputeResolution: resolution, status: locked.completedAt ? "completed" : "cancelled" },
+        data: {
+          disputeResolution: resolution,
+          status: locked.completedAt || worked.length > 0 ? "completed" : "cancelled",
+          ...(finishedDuringDispute ? { completedAt: lastWorked ?? new Date() } : {}),
+        },
         include: jobInclude,
       });
       fx.job(id);

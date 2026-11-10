@@ -1,5 +1,5 @@
 /** General language knowledge only. Trade words live in the Category table, never here. */
-import { normalizeUrdu } from "./normalize";
+import { normalizeUrdu, tokenize } from "./normalize";
 
 const ROMAN_STOP = `
 hai hain he hay h ka ki ke ko se mein main mai me mera meri mere mujhe muje hamara hamari
@@ -8,18 +8,26 @@ rahi rha rhi kar karo karna karni karne krna kro chahiye chahye chahiey theek th
 khrab ji bhai sahab sahib kya kyun kaise kab kahan koi kuch hua hui tha thi the wala wali wale
 kaam kam the a an is am i my of to in on at and for not need needs please plz pls it its was
 have has with this that we you
+aa aao aana aaj aap ap abhi kal phir ab sa si se bohat bahut bhot thora thori liye lie
+sakta sakti sakte saktay saktey sakun saken chhota chhoti chhote chota choti chote
+samne samnay saamne samney someone anyone some one wrong number kehna kaha kehta kehti kehte
 `;
 
 const URDU_STOP = `
 ہے ہیں کا کی کے کو سے میں میرا میری میرے مجھے ہمارا ہماری نہیں اور پر بھی یہ وہ ایک ہوں ہو گیا گئی
 رہا رہی کر کرو کرنا کرنی کرنے چاہیے ٹھیک خراب جی بھائی صاحب کیا کیوں کیسے کب کہاں کوئی کچھ ہوا ہوئی تھا تھی
 تھے والا والی والے کام
+آ آپ آج کل ابھی پھر اب سا سی بہت تھوڑا تھوڑی لیے سکتا سکتی سکتے چھوٹا چھوٹی چھوٹے سامنے کہنا کہا کہتا کہتی کہتے
 `;
 
 export const STOP_WORDS: ReadonlySet<string> = new Set([
   ...ROMAN_STOP.trim().split(/\s+/),
   ...URDU_STOP.trim().split(/\s+/).map(normalizeUrdu),
 ]);
+
+/** The words of a search that carry meaning. "need painting done" is painting and done. */
+export const significantWords = (text: string): string[] =>
+  tokenize(text).filter((word) => word.length > 1 && !STOP_WORDS.has(word));
 
 const urdu = (words: string[]) => words.map(normalizeUrdu);
 

@@ -43,3 +43,5 @@ export interface JevProfileHints {
   rate: number | null;
   area: string | null;
 }
+
+export type JevProfileField = keyof JevProfileHints;

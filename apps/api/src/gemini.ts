@@ -1,6 +1,8 @@
 import { GoogleGenAI, Type, type Part, type Schema } from "@google/genai";
 import type { Category } from "@prisma/client";
+import type { OnboardField } from "@kaamwala/contracts";
 import { z } from "zod";
+import { firstSuccess } from "./budget";
 import { env } from "./env";
 import { getActiveCategories } from "./jev";
 import { cleanMime, type FilePart } from "./uploads";
@@ -12,7 +14,8 @@ export const geminiConfigured = Boolean(client);
 /** Gemini was not configured, failed, timed out or returned something unusable. */
 export class GeminiUnavailable extends Error {}
 
-const TIMEOUT_PER_MODEL_MS = 30_000;
+/** One deadline for the whole chain, so a stalled network cannot hold a request for minutes. */
+const GEMINI_BUDGET = { totalMs: 30_000, firstMs: 18_000, minAttemptMs: 1_000 };
 const models = [env.GEMINI_MODEL, ...env.GEMINI_FALLBACK_MODELS.split(",").map((m) => m.trim()).filter(Boolean)];
 
 async function generateWith<T>(
@@ -21,37 +24,32 @@ async function generateWith<T>(
   parts: Part[],
   schema: Schema,
   validator: z.ZodType<T, z.ZodTypeDef, unknown>,
+  abortSignal: AbortSignal,
 ): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    const request = ai.models.generateContent({
-      model,
-      contents: [{ role: "user", parts }],
-      config: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.1 },
-    });
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("timed out")), TIMEOUT_PER_MODEL_MS);
-    });
-    const response = await Promise.race([request, timeout]);
-    const parsed = validator.safeParse(JSON.parse(response.text ?? ""));
-    if (!parsed.success) throw new Error("unexpected response shape");
-    return parsed.data;
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+  const response = await ai.models.generateContent({
+    model,
+    contents: [{ role: "user", parts }],
+    config: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.1, abortSignal },
+  });
+  const parsed = validator.safeParse(JSON.parse(response.text ?? ""));
+  if (!parsed.success) throw new Error("unexpected response shape");
+  return parsed.data;
 }
 
-/** Tries each configured model in turn. Fails only when none of them gives a usable answer. */
+/** Tries each configured model in turn. Fails only when none of them gives a usable answer in time. */
 async function generate<T>(parts: Part[], schema: Schema, validator: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<T> {
   if (!client) throw new GeminiUnavailable("Gemini API key is not configured.");
-  for (const model of models) {
-    try {
-      return await generateWith(client, model, parts, schema, validator);
-    } catch (err) {
-      console.warn(`Gemini model ${model} failed: ${(err instanceof Error ? err.message : "unknown").slice(0, 200)}`);
-    }
+  try {
+    return await firstSuccess(
+      models,
+      (model, signal) => generateWith(client, model, parts, schema, validator, signal),
+      GEMINI_BUDGET,
+      (model, err) =>
+        console.warn(`Gemini model ${model} failed: ${(err instanceof Error ? err.message : "unknown").slice(0, 200)}`),
+    );
+  } catch {
+    throw new GeminiUnavailable("No Gemini model gave a usable answer.");
   }
-  throw new GeminiUnavailable("No Gemini model gave a usable answer.");
 }
 
 const inline = (file: FilePart): Part => ({
@@ -88,13 +86,28 @@ export interface OnboardingExtract {
   workingHours: string | null;
 }
 
-export function extractOnboarding(input: { audio?: FilePart | null; text?: string | null }) {
+const FIELD_QUESTIONS: Record<OnboardField, string> = {
+  name: 'their name. Put it in "name".',
+  trade: 'what trade they do. Put it in "categoryIds".',
+  skills: 'which skills they have. Put them in "skills".',
+  years: 'how many years of experience they have. A bare number word such as paanch or پانچ is the answer. Put it in "years".',
+  rate: 'their daily rate in Pakistani rupees. A bare amount is the answer. Put it in "rate".',
+  area: 'which area or sector they work in. Put it in "area".',
+  workingHours: 'their working hours. Put them in "workingHours".',
+};
+
+export function extractOnboarding(input: { audio?: FilePart | null; text?: string | null; field?: OnboardField | null }) {
   const parts: Part[] = [];
   if (input.audio) parts.push(inline(input.audio));
+  const typed = input.text ? `Their words: """${input.text}"""` : "";
+  const source = input.audio ? `${TRANSCRIPT_RULE}\n${typed}` : `${typed}\nUse their words as the transcript.`;
+  const task = input.field
+    ? `They were asked only for ${FIELD_QUESTIONS[input.field]} Their reply answers that question and nothing else, even if it is a single word. Leave every other field null or empty.`
+    : "Extract name, trades, skills, years of experience, area, rate in Pakistani rupees and working hours.";
   parts.push({
-    text: `A skilled trade worker in Islamabad or Rawalpindi, Pakistan is introducing themselves to build a profile.
-${input.audio ? TRANSCRIPT_RULE : `Their words: """${input.text ?? ""}"""\nUse their words as the transcript.`}
-Extract name, trades, skills, years of experience, area, rate in Pakistani rupees and working hours.
+    text: `A skilled trade worker in Islamabad or Rawalpindi, Pakistan is ${input.field ? "correcting one detail of" : "introducing themselves to build"} a profile.
+${source}
+${task}
 Use null for anything they did not say. Never guess.
 Choose categoryIds only from this list:
 ${categoryList()}`,

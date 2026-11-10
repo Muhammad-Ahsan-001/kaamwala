@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { OfflinePreset, WorkerCard } from "@kaamwala/contracts";
+import { significantWords, tokenize } from "@kaamwala/jev";
 import { Prisma, type WorkerProfile } from "@prisma/client";
 import { AREAS, findArea } from "../areas";
 import type { AuthContext } from "../auth";
@@ -37,19 +38,28 @@ export async function searchWorkers(input: SearchInput) {
     }
   }
 
+  // A disabled category cannot be booked, so its workers must not be offered either.
+  const activeIds = getActiveCategories().map((c) => c.id);
+  if (categoryId && !activeIds.includes(categoryId)) return { items: [], detected };
+
   const where: Prisma.WorkerProfileWhereInput = {
     status: "available",
     approved: true,
     user: { suspended: false },
-    ...(categoryId ? { categoryIds: { has: categoryId } } : {}),
+    categoryIds: categoryId ? { has: categoryId } : { hasSome: activeIds },
   };
   let rows = await prisma.workerProfile.findMany({ where, include: { user: true } });
 
   if (q && !detected) {
-    const needle = q.toLowerCase();
-    rows = rows.filter((w) =>
-      [w.user.name ?? "", w.area, ...w.skills].some((field) => field.toLowerCase().includes(needle)),
+    const words = significantWords(q);
+    const matched = rows.filter((w) =>
+      [w.user.name ?? "", w.area, ...w.skills].some((field) => {
+        const text = tokenize(field).join(" ");
+        return words.some((word) => text.includes(word));
+      }),
     );
+    // A chosen trade stands on its own: free text the matcher cannot read must not empty it.
+    rows = matched.length > 0 || !input.categoryId ? matched : rows;
   }
 
   const origin = input.lat !== undefined && input.lng !== undefined ? { lat: input.lat, lng: input.lng } : undefined;
@@ -136,19 +146,15 @@ export async function createWorker(auth: AuthContext, input: WorkerInput): Promi
   if (input.cnic && !cnicDigits) throw unprocessable("CNIC_UNREADABLE", "We could not read a 13-digit CNIC number.");
 
   // One transaction: a duplicate phone or CNIC leaves no worker and no ledger entry behind.
+  // A phone that already has an account is never taken over: its name and role are its owner's.
   const profile = await prisma.$transaction(async (tx) => {
     let userId = auth.user.id;
     if (input.forPhone) {
       const phone = normalizePhone(input.forPhone);
-      const existing = await tx.user.findUnique({ where: { phone } });
-      if (existing && existing.role !== "worker" && existing.role !== "customer") {
-        throw conflict("PHONE_IN_USE", "This phone belongs to a staff account.");
-      }
-      const user = await tx.user.upsert({
-        where: { phone },
-        create: { phone, name: input.name, role: "worker" },
-        update: { name: input.name, role: "worker" },
-      });
+      const owner = await tx.user.findUnique({ where: { phone }, include: { workerProfile: { select: { id: true } } } });
+      if (owner?.workerProfile) throw conflict("ALREADY_REGISTERED", "This phone already has a worker profile.");
+      if (owner) throw conflict("PHONE_IN_USE", "This phone already has an account. Its owner can sign up from their own phone.");
+      const user = await tx.user.create({ data: { phone, name: input.name, role: "worker" } });
       userId = user.id;
     } else {
       await tx.user.update({ where: { id: userId }, data: { name: input.name } });
@@ -287,14 +293,12 @@ export function cleanCnic(input: string): string | null {
 }
 
 /**
- * A CNIC checked after an agent signup can turn out to be a duplicate. That signup must leave no
- * ledger entry, and the profile goes too unless it has already taken part in real work.
+ * A CNIC checked after signup can turn out to be a duplicate. That signup must leave no ledger
+ * entry, and the profile goes too unless it has already taken part in real work.
  */
-async function voidAgentSignup(workerId: string): Promise<boolean> {
+async function voidDuplicateSignup(workerId: string): Promise<boolean> {
   const removed = await prisma.$transaction(async (tx) => {
-    const entry = await tx.agentLedgerEntry.findUnique({ where: { workerId } });
-    if (!entry) return false;
-    await tx.agentLedgerEntry.delete({ where: { workerId } });
+    await tx.agentLedgerEntry.deleteMany({ where: { workerId } });
     const history = await Promise.all([
       tx.jobAssignment.count({ where: { workerId } }),
       tx.offer.count({ where: { workerId } }),
@@ -308,19 +312,26 @@ async function voidAgentSignup(workerId: string): Promise<boolean> {
   return removed;
 }
 
+/** Refuses a CNIC someone else holds. A signup with no valid CNIC of its own is undone as well. */
+async function refuseDuplicate(workerId: string): Promise<never> {
+  // Someone who already passed this check has only mistyped a later correction.
+  const ownHash = await prisma.cnicHash.count({ where: { workerId } });
+  if (!ownHash) await voidDuplicateSignup(workerId);
+  throw conflict("CNIC_DUPLICATE", CNIC_TAKEN);
+}
+
 /** Stores only a salted hash. A CNIC already used by another worker is refused. */
 export async function registerCnic(workerId: string, digits: string): Promise<void> {
   const hash = hashCnic(digits);
   const owner = await prisma.cnicHash.findUnique({ where: { hash } });
-  if (owner && owner.workerId !== workerId) {
-    await voidAgentSignup(workerId);
-    throw conflict("CNIC_DUPLICATE", CNIC_TAKEN);
-  }
+  if (owner && owner.workerId !== workerId) await refuseDuplicate(workerId);
   try {
     await prisma.cnicHash.upsert({ where: { workerId }, create: { workerId, hash }, update: { hash } });
-  } catch {
-    await voidAgentSignup(workerId);
-    throw conflict("CNIC_DUPLICATE", CNIC_TAKEN);
+  } catch (err) {
+    // Two workers racing on one CNIC: the unique index stops the second. Anything else is a real fault.
+    const onHash = err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002" && String(err.meta?.target).includes("hash");
+    if (!onHash) throw err;
+    await refuseDuplicate(workerId);
   }
 }
 

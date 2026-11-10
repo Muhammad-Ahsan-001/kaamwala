@@ -2,16 +2,16 @@ import type { Job as JobDto } from "@kaamwala/contracts";
 import { Prisma, type Category } from "@prisma/client";
 import type { AuthContext } from "../auth";
 import { prisma, type Tx } from "../db";
-import { env } from "../env";
 import { badRequest, conflict, forbidden, notFound, unprocessable } from "../errors";
 import { GeminiUnavailable, writeJobCard } from "../gemini";
-import { distanceKm, fromDateOnly, todayPkt, toDateOnly } from "../geo";
+import { fromDateOnly, todayPkt, toDateOnly } from "../geo";
 import { jev } from "../jev";
 import { pushToUsers } from "../push";
-import { jobInclude, offerInclude, toJob, toOffers, type JobFull } from "../serialize";
+import { jobInclude, offerInclude, toJob, toOffers, toOpenJobView, type JobFull } from "../serialize";
 import { bookedTime, dayDates, jobFacts } from "./days";
+import { openJobRecipients, withinOpenJobRadius, workerMatchesOpenJob } from "./openJobs";
 import { movePrice as nextPrice, splitEarnings, type PriceDirection } from "./pricing";
-import { assertAllAvailable, lockJob, lockWorkers, releaseWorkers, runTx, setStatus, type Effects } from "./tx";
+import { assertAllAvailable, lockCrew, lockJob, lockWorkers, releaseWorkers, runTx, setStatus, type Effects } from "./tx";
 
 type Side = "customer" | "worker" | "member";
 
@@ -57,6 +57,19 @@ async function workerUserIds(tx: Tx, ids: string[]): Promise<string[]> {
 }
 
 const jobUrl = (id: string) => `/app/jobs/${id}`;
+
+const WRONG_TRADE = "This work is not in the trades they do.";
+const MAX_UNANSWERED_REQUESTS = 3;
+
+/** One customer cannot take the whole map off the market by sending everyone a request. */
+async function assertRequestSlot(tx: Tx, customerId: string): Promise<void> {
+  // Holding the customer's row makes two simultaneous requests count one after the other.
+  await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${customerId} FOR NO KEY UPDATE`;
+  const waiting = await tx.job.count({ where: { customerId, status: "requested" } });
+  if (waiting >= MAX_UNANSWERED_REQUESTS) {
+    throw conflict("TOO_MANY_REQUESTS", "Please wait for an answer to your other requests, or cancel one.");
+  }
+}
 
 export interface CreateJobInput {
   mode: "direct" | "open" | "crew";
@@ -130,9 +143,11 @@ export async function createJob(auth: AuthContext, input: CreateJobInput): Promi
     const workerId = input.workerId;
     if (!workerId) throw badRequest("WORKER_REQUIRED", "Choose a worker first.");
     const job = await runTx(async (tx, fx) => {
+      await assertRequestSlot(tx, auth.user.id);
       assertAllAvailable(await lockWorkers(tx, [workerId]));
       const worker = await tx.workerProfile.findUniqueOrThrow({ where: { id: workerId } });
       if (worker.userId === auth.user.id) throw unprocessable("CANNOT_HIRE_SELF", "You cannot hire yourself.");
+      if (!worker.categoryIds.includes(category.id)) throw unprocessable("WRONG_TRADE", WRONG_TRADE);
       const created = await tx.job.create({
         data: {
           ...base,
@@ -159,8 +174,12 @@ export async function createJob(auth: AuthContext, input: CreateJobInput): Promi
 
   const crewId = input.crewId as string;
   const job = await runTx(async (tx, fx) => {
-    const crew = await tx.crew.findUnique({ where: { id: crewId }, include: { members: true } });
-    if (!crew) throw notFound("Crew");
+    await assertRequestSlot(tx, auth.user.id);
+    const crew = await lockCrew(tx, crewId);
+    if (!crew.categoryIds.includes(category.id)) throw unprocessable("WRONG_TRADE", WRONG_TRADE);
+    if (crew.members.some((m) => m.worker.userId === auth.user.id)) {
+      throw unprocessable("CANNOT_HIRE_SELF", "You cannot hire your own crew.");
+    }
     const memberIds = crew.members.map((m) => m.workerId);
     assertAllAvailable(await lockWorkers(tx, memberIds));
     const created = await tx.job.create({
@@ -192,20 +211,7 @@ export async function createJob(auth: AuthContext, input: CreateJobInput): Promi
 }
 
 async function notifyOpenJob(job: JobFull, category: Category): Promise<void> {
-  const origin = { lat: job.lat, lng: job.lng };
-  const nearby = await prisma.workerProfile.findMany({
-    where: { status: "available", approved: true, categoryIds: { has: category.id }, user: { suspended: false } },
-    select: { id: true, userId: true, lat: true, lng: true },
-  });
-  const inRange = nearby.filter((w) => distanceKm(origin, w) <= env.OPEN_JOB_RADIUS_KM);
-  let recipients = inRange.map((w) => w.userId);
-  if (job.mode === "crew") {
-    const crews = await prisma.crew.findMany({
-      where: { categoryIds: { has: category.id } },
-      select: { leader: { select: { userId: true } } },
-    });
-    recipients = crews.map((c) => c.leader.userId);
-  }
+  const recipients = (await openJobRecipients(job)).filter((r) => r.ready).map((r) => r.userId);
   await pushToUsers(recipients, {
     title: "قریب نیا کام",
     body: `${category.nameUr}: ${job.area}`,
@@ -220,48 +226,61 @@ export async function listMine(auth: AuthContext): Promise<JobDto[]> {
     where: {
       OR: [
         { customerId: auth.user.id },
-        ...(workerId ? [{ assignments: { some: { workerId } } }, { offers: { some: { workerId } } }] : []),
+        ...(workerId
+          ? [{ assignments: { some: { workerId } } }, { offers: { some: { workerId, status: "pending" as const } } }]
+          : []),
       ],
     },
     include: jobInclude,
     orderBy: { createdAt: "desc" },
     take: 200,
   });
-  return jobs.map(toJob);
+  return jobs.map((job) => (sideOf(auth, job) ? toJob(job) : toOpenJobView(job)));
 }
 
 export async function listOpenFeed(auth: AuthContext): Promise<JobDto[]> {
   const worker = auth.worker;
   if (!worker) throw forbidden("Finish worker sign-up first.");
-  const leadsCrew = (await prisma.crew.count({ where: { leaderId: worker.id } })) > 0;
+  if (!worker.approved) return [];
+  // A crew can take work its leader does not personally do, so crew jobs follow the crews' trades.
+  const led = await prisma.crew.findMany({ where: { leaderId: worker.id }, select: { categoryIds: true } });
+  const crewTrades = [...new Set(led.flatMap((c) => c.categoryIds))];
   const jobs = await prisma.job.findMany({
     where: {
       status: "open",
-      categoryId: { in: worker.categoryIds },
-      ...(leadsCrew ? {} : { mode: "open" as const }),
+      customerId: { not: auth.user.id },
+      OR: [
+        { mode: "open", categoryId: { in: worker.categoryIds } },
+        { mode: "crew", categoryId: { in: crewTrades } },
+      ],
     },
     include: jobInclude,
     orderBy: { createdAt: "desc" },
     take: 100,
   });
-  return jobs.filter((j) => distanceKm({ lat: j.lat, lng: j.lng }, worker) <= env.OPEN_JOB_RADIUS_KM).map(toJob);
+  return jobs.filter((j) => withinOpenJobRadius(j, worker)).map(toOpenJobView);
 }
 
 export async function getJob(auth: AuthContext, id: string): Promise<JobDto> {
   const job = await prisma.job.findUnique({ where: { id }, include: jobInclude });
   if (!job) throw notFound("Job");
-  await assertCanView(auth, job);
-  return toJob(job);
+  return (await hasFullView(auth, job)) ? toJob(job) : toOpenJobView(job);
 }
 
-async function assertCanView(auth: AuthContext, job: JobFull): Promise<void> {
-  if (auth.user.role === "admin" || sideOf(auth, job)) return;
+/** True for the job's own people, false for a worker who may only see it as open work. */
+async function hasFullView(auth: AuthContext, job: JobFull): Promise<boolean> {
+  if (auth.user.role === "admin" || sideOf(auth, job)) return true;
   if (auth.worker) {
-    if (job.status === "open") return;
-    const offered = await prisma.offer.count({ where: { jobId: job.id, workerId: auth.worker.id } });
-    if (offered) return;
+    const bidding = await prisma.offer.count({ where: { jobId: job.id, workerId: auth.worker.id, status: "pending" } });
+    if (bidding) return false;
+    if (job.status === "open" && (await workerMatchesOpenJob(auth.worker, job))) return false;
   }
   throw forbidden("You are not part of this job.");
+}
+
+/** The chat is private to the job's own people. Having bid on the job gives no right to read it. */
+export function assertCanReadMessages(auth: AuthContext, job: JobFull): void {
+  if (auth.user.role !== "admin") requireParty(auth, job);
 }
 
 export async function listOffers(auth: AuthContext, jobId: string) {
@@ -295,12 +314,15 @@ export async function createOffer(
     }
     if (job.mode === "crew" && !input.crewId) throw unprocessable("CREW_REQUIRED", "Only crews can bid on this job.");
     if (job.mode === "open" && input.crewId) throw unprocessable("CREW_NOT_ALLOWED", "This job is for one worker.");
+    if (!withinOpenJobRadius(job, worker)) throw forbidden("This job is too far from your area.");
 
     if (input.crewId) {
-      const crew = await tx.crew.findUnique({ where: { id: input.crewId }, include: { members: true } });
-      if (!crew) throw notFound("Crew");
+      const crew = await lockCrew(tx, input.crewId);
       if (crew.leaderId !== worker.id) throw forbidden("Only the crew leader can bid.");
       if (!crew.categoryIds.includes(job.categoryId)) throw forbidden("This job is not in your crew's trade.");
+      if (crew.members.some((m) => m.worker.userId === job.customerId)) {
+        throw unprocessable("CANNOT_HIRE_SELF", "You cannot bid on your own job.");
+      }
       assertAllAvailable(await lockWorkers(tx, crew.members.map((m) => m.workerId)));
     } else {
       assertAllAvailable(await lockWorkers(tx, [worker.id]));
@@ -328,6 +350,17 @@ export async function createOffer(
   return dto;
 }
 
+/** Each bidder learns their own result, and that is all they learn about the job from here on. */
+async function rejectPendingOffers(tx: Tx, fx: Effects, jobId: string, exceptOfferId?: string): Promise<void> {
+  const pending = await tx.offer.findMany({
+    where: { jobId, status: "pending", ...(exceptOfferId ? { id: { not: exceptOfferId } } : {}) },
+    select: { id: true },
+  });
+  if (!pending.length) return;
+  await tx.offer.updateMany({ where: { id: { in: pending.map((o) => o.id) } }, data: { status: "rejected" } });
+  for (const { id } of pending) fx.offer(id, "offer.updated");
+}
+
 /** One transaction with job and worker row locks: a worker can never end up on two jobs. */
 export async function acceptOffer(auth: AuthContext, jobId: string, offerId: string): Promise<JobDto> {
   const job = await runTx(async (tx, fx) => {
@@ -336,18 +369,26 @@ export async function acceptOffer(auth: AuthContext, jobId: string, offerId: str
     requireStatus(locked, ["open"]);
     const offer = await tx.offer.findFirst({
       where: { id: offerId, jobId },
-      include: { worker: true, crew: { include: { members: true } } },
+      include: { worker: true },
     });
     if (!offer) throw notFound("Offer");
     if (offer.status !== "pending") throw conflict("OFFER_NOT_PENDING", "This offer is no longer open.");
 
-    const workerIds = offer.crew ? offer.crew.members.map((m) => m.workerId) : [offer.workerId];
+    let workerIds = [offer.workerId];
+    if (offer.crewId) {
+      // The crew as it stands now, not as it stood when the leader bid.
+      const crew = await lockCrew(tx, offer.crewId);
+      if (crew.members.some((m) => m.worker.userId === auth.user.id)) {
+        throw unprocessable("CANNOT_HIRE_SELF", "You cannot hire your own crew.");
+      }
+      workerIds = crew.members.map((m) => m.workerId);
+    }
     assertAllAvailable(await lockWorkers(tx, workerIds));
 
     await tx.jobAssignment.createMany({ data: workerIds.map((workerId) => ({ jobId, workerId })) });
     await setStatus(tx, fx, workerIds, "requested");
     await tx.offer.update({ where: { id: offer.id }, data: { status: "accepted", acceptedAt: new Date() } });
-    await tx.offer.updateMany({ where: { jobId, id: { not: offer.id }, status: "pending" }, data: { status: "rejected" } });
+    await rejectPendingOffers(tx, fx, jobId, offer.id);
     const updated = await tx.job.update({
       where: { id: jobId },
       data: { status: "negotiating", proposedPrice: offer.price, proposedById: offer.worker.userId, crewId: offer.crewId },
@@ -447,13 +488,19 @@ export async function movePrice(auth: AuthContext, jobId: string, direction: Pri
   return toJob(job);
 }
 
+const startHasPassed = (job: { startDate: Date }) => fromDateOnly(job.startDate) < todayPkt();
+
+const cardStillStands = (job: JobFull, price: number) =>
+  job.status === "pending_confirmation" && job.card !== null && job.agreedPrice === price && !startHasPassed(job);
+
 const formatPkt = (d: Date) =>
   d.toLocaleString("en-PK", { timeZone: "Asia/Karachi", dateStyle: "medium", timeStyle: "short" });
 
 export async function generateCard(auth: AuthContext, jobId: string): Promise<JobDto> {
   const before = await prisma.job.findUnique({
     where: { id: jobId },
-    include: { ...jobInclude, category: true, messages: { orderBy: { createdAt: "asc" }, take: 20 } },
+    // Newest first, because the final agreement is what the card has to reflect.
+    include: { ...jobInclude, category: true, messages: { orderBy: { createdAt: "desc" }, take: 20 } },
   });
   if (!before) throw notFound("Job");
   requireDecider(auth, before);
@@ -461,9 +508,15 @@ export async function generateCard(auth: AuthContext, jobId: string): Promise<Jo
   const price = before.proposedPrice;
   if (price === null) throw conflict("PRICE_REQUIRED", "Agree a price first.");
 
+  // Both sides often tap at once. A card already waiting for them stays, so a confirmation is never lost.
+  if (cardStillStands(before, price)) return toJob(before);
+
+  // A job that sat past its start date is booked from today, so no card ever names days already gone.
+  const schedule = startHasPassed(before) ? { ...before, startDate: toDateOnly(todayPkt()), scheduledFor: null } : before;
+
   // Days, dates and money always come from the database, never from the model.
   const totalPrice = price * before.durationDays;
-  const booked = bookedTime(before, formatPkt);
+  const booked = bookedTime(schedule, formatPkt);
 
   // The model call stays outside the transaction so a slow reply cannot hold row locks.
   let task = before.description.slice(0, 200);
@@ -473,10 +526,10 @@ export async function generateCard(auth: AuthContext, jobId: string): Promise<Jo
     const card = await writeJobCard({
       description: before.description,
       area: before.area,
-      scheduledFor: before.scheduledFor,
+      scheduledFor: schedule.scheduledFor,
       categoryName: before.category.nameEn,
-      transcripts: before.messages.flatMap((m) => m.transcript ?? m.text ?? []),
-      facts: jobFacts(before),
+      transcripts: [...before.messages].reverse().flatMap((m) => m.transcript ?? m.text ?? []),
+      facts: jobFacts(schedule),
     });
     task = card.task;
     time = booked ?? card.time;
@@ -491,12 +544,16 @@ export async function generateCard(auth: AuthContext, jobId: string): Promise<Jo
     const locked = await lockJob(tx, jobId);
     requireStatus(locked, ["negotiating", "pending_confirmation"]);
     if (locked.proposedPrice !== price) throw conflict("PRICE_CHANGED", "The price changed. Try again.");
+    // The model call above is slow: the other side may have made a card and confirmed meanwhile.
+    if (cardStillStands(locked, price)) return locked;
     const updated = await tx.job.update({
       where: { id: jobId },
       data: {
         status: "pending_confirmation",
         agreedPrice: price,
         totalPrice,
+        startDate: schedule.startDate,
+        scheduledFor: schedule.scheduledFor,
         card: {
           task,
           addressArea: before.area,
@@ -504,7 +561,7 @@ export async function generateCard(auth: AuthContext, jobId: string): Promise<Jo
           agreedPrice: price,
           pricePerDay: price,
           durationDays: before.durationDays,
-          startDate: fromDateOnly(before.startDate),
+          startDate: fromDateOnly(schedule.startDate),
           totalPrice,
           source,
           skills,
@@ -522,10 +579,29 @@ export async function generateCard(auth: AuthContext, jobId: string): Promise<Jo
 
 /** When both sides have confirmed, every assigned worker goes to engaged in this one transaction. */
 export async function confirmJob(auth: AuthContext, jobId: string): Promise<JobDto> {
-  const job = await runTx(async (tx, fx) => {
+  const result = await runTx(async (tx, fx) => {
     const locked = await lockJob(tx, jobId);
     const side = requireDecider(auth, locked);
     requireStatus(locked, ["pending_confirmation"]);
+
+    // The dates on this card are gone, so nobody may confirm them. Booking from today needs a new card.
+    if (startHasPassed(locked)) {
+      await tx.job.update({
+        where: { id: jobId },
+        data: {
+          status: "negotiating",
+          card: Prisma.DbNull,
+          customerConfirmed: false,
+          workerConfirmed: false,
+          agreedPrice: null,
+          totalPrice: null,
+          startDate: toDateOnly(todayPkt()),
+          scheduledFor: null,
+        },
+      });
+      fx.job(jobId);
+      return null;
+    }
 
     const customerConfirmed = locked.customerConfirmed || side === "customer";
     const workerConfirmed = locked.workerConfirmed || side === "worker";
@@ -562,7 +638,8 @@ export async function confirmJob(auth: AuthContext, jobId: string): Promise<JobD
     }
     return updated;
   });
-  return toJob(job);
+  if (!result) throw conflict("CARD_OUTDATED", "The start date on this job card has passed. Please make a new card.");
+  return toJob(result);
 }
 
 /** Marks one day done and pays it. A crew's day adds up exactly to the per-day price. */
@@ -664,7 +741,7 @@ export async function completeJob(auth: AuthContext, jobId: string): Promise<Job
 }
 
 async function cancelInTx(tx: Tx, fx: Effects, job: JobFull, except?: string): Promise<JobFull> {
-  await tx.offer.updateMany({ where: { jobId: job.id, status: "pending" }, data: { status: "rejected" } });
+  await rejectPendingOffers(tx, fx, job.id);
   const workerIds = activeWorkerIds(job);
   await lockWorkers(tx, workerIds);
   await releaseWorkers(tx, fx, job, except);
@@ -696,22 +773,65 @@ export async function cancelJob(auth: AuthContext, jobId: string): Promise<JobDt
 export async function disputeJob(auth: AuthContext, jobId: string, reason: string): Promise<JobDto> {
   const job = await runTx(async (tx, fx) => {
     const locked = await lockJob(tx, jobId);
-    requireParty(auth, locked);
+    const ongoing = locked.status === "engaged";
+    // A dispute during the work ends it for everyone, so only those who decide for the job can raise one.
+    const side = ongoing ? requireDecider(auth, locked) : requireParty(auth, locked);
     requireStatus(locked, ["engaged", "completed"]);
-    if (locked.status === "engaged") {
+    const workers = await workerUserIds(tx, locked.assignments.map((a) => a.workerId));
+    if (ongoing) {
       await lockWorkers(tx, activeWorkerIds(locked));
       await releaseWorkers(tx, fx, locked);
       await tx.jobDay.updateMany({ where: { jobId, status: "scheduled" }, data: { status: "skipped" } });
     }
     const updated = await tx.job.update({
       where: { id: jobId },
-      data: { status: "disputed", disputeReason: reason },
+      data: {
+        status: "disputed",
+        disputeReason: reason,
+        // Only the days actually worked are owed, as on an early finish.
+        ...(ongoing ? { totalPrice: (locked.agreedPrice as number) * countCompleted(locked) } : {}),
+      },
       include: jobInclude,
     });
     fx.job(jobId);
+    fx.push(side === "customer" ? workers : [locked.customerId], {
+      title: "شکایت درج ہو گئی",
+      body: locked.area,
+      url: jobUrl(jobId),
+      tag: jobId,
+    });
     return updated;
   });
   return toJob(job);
 }
 
-export { requireParty, assertCanView };
+/**
+ * Suspension must always be possible, so a job in the way ends with it, in the same transaction.
+ * Days already worked stay paid, as on an early finish.
+ */
+export async function suspendWorker(workerId: string): Promise<{ userId: string; endedJobId: string | null }> {
+  return runTx(async (tx, fx) => {
+    const profile = await tx.workerProfile.findUnique({ where: { id: workerId } });
+    if (!profile) throw notFound("Worker");
+    const assignment = await tx.jobAssignment.findFirst({ where: { workerId, active: true } });
+    const job = assignment ? await lockJob(tx, assignment.jobId) : null;
+    await lockWorkers(tx, [workerId]);
+
+    let endedJobId: string | null = null;
+    if (job?.assignments.some((a) => a.workerId === workerId && a.active)) {
+      endedJobId = job.id;
+      const worked = countCompleted(job);
+      const others = (await workerUserIds(tx, activeWorkerIds(job))).filter((id) => id !== profile.userId);
+      if (job.status === "engaged" && worked > 0) await finishJob(tx, fx, job, worked, new Date());
+      else await cancelInTx(tx, fx, job, workerId);
+      fx.push([job.customerId, ...others], { title: "کام منسوخ ہو گیا", body: job.area, url: jobUrl(job.id), tag: job.id });
+    }
+
+    await tx.workerProfile.update({ where: { id: workerId }, data: { approved: false } });
+    await tx.user.update({ where: { id: profile.userId }, data: { suspended: true } });
+    await setStatus(tx, fx, [workerId], "offline");
+    return { userId: profile.userId, endedJobId };
+  });
+}
+
+export { requireParty };

@@ -41,20 +41,71 @@ export const AREAS: Area[] = [
   { name: "Soan Garden", nameUr: "سون گارڈن", lat: 33.5645, lng: 73.1405 },
   { name: "Bahria Town", nameUr: "بحریہ ٹاؤن", lat: 33.5225, lng: 73.0965 },
   { name: "DHA Phase 2", nameUr: "ڈی ایچ اے فیز ٹو", lat: 33.5305, lng: 73.1555 },
+  { name: "G-7", nameUr: "جی سیون", lat: 33.7005, lng: 73.0705 },
+  { name: "G-12", nameUr: "جی ٹویلو", lat: 33.6595, lng: 72.9795 },
+  { name: "G-14", nameUr: "جی فورٹین", lat: 33.6395, lng: 72.9445 },
+  { name: "G-15", nameUr: "جی ففٹین", lat: 33.6295, lng: 72.9265 },
+  { name: "F-9", nameUr: "ایف نائن", lat: 33.7025, lng: 73.0265 },
+  { name: "H-9", nameUr: "ایچ نائن", lat: 33.6735, lng: 73.0485 },
+  { name: "H-10", nameUr: "ایچ ٹین", lat: 33.6655, lng: 73.0305 },
+  { name: "H-11", nameUr: "ایچ الیون", lat: 33.6575, lng: 73.0125 },
+  { name: "H-12", nameUr: "ایچ ٹویلو", lat: 33.6475, lng: 72.9945 },
+  { name: "I-11", nameUr: "آئی الیون", lat: 33.6405, lng: 73.0225 },
+  { name: "I-12", nameUr: "آئی ٹویلو", lat: 33.6305, lng: 73.0045 },
+  { name: "I-13", nameUr: "آئی تھرٹین", lat: 33.6205, lng: 72.9865 },
+  { name: "I-14", nameUr: "آئی فورٹین", lat: 33.6105, lng: 72.9685 },
+  { name: "Faizabad", nameUr: "فیض آباد", lat: 33.6625, lng: 73.0875 },
+  { name: "Murree Road", nameUr: "مری روڈ", lat: 33.6255, lng: 73.0705 },
+  { name: "Tench Bhatta", nameUr: "ٹینچ بھاٹہ", lat: 33.5825, lng: 73.0405 },
+  { name: "Lalkurti", nameUr: "لال کرتی", lat: 33.5885, lng: 73.0605 },
 ];
 
 /** Both spellings, Roman first, for Jev's area reading. */
 export const AREA_NAMES = AREAS.flatMap((a) => [a.name, a.nameUr]);
 
+const SECTOR_PATTERN = /\b([defghi])[\s-]{0,4}(\d{1,2})/i;
+const KNOWN_SECTOR = /^([D-I])-(\d{1,2})$/;
+const MIN_SECTOR = 5;
+const MAX_SECTOR = 18;
+
+const hasPhrase = (text: string, phrase: string) => phrase !== "" && ` ${text} `.includes(` ${phrase} `);
+
+/** The longest name first, so a long name is never lost to a shorter one inside it. */
+const BY_LONGEST_NAME = [...AREAS].sort((a, b) => b.name.length - a.name.length);
+
+/** A real sector the list does not hold yet takes its position from the closest one it does. */
+function nearestSector(letter: string, number: number): Area | null {
+  if (number < MIN_SECTOR || number > MAX_SECTOR) return null;
+  const column = letter.toUpperCase().charCodeAt(0);
+  let best: Area | null = null;
+  let bestGap = Number.POSITIVE_INFINITY;
+  for (const area of AREAS) {
+    const known = area.name.match(KNOWN_SECTOR);
+    if (!known) continue;
+    const gap = Math.abs(column - (known[1] as string).charCodeAt(0)) * 2 + Math.abs(number - Number(known[2]));
+    if (gap < bestGap) {
+      best = area;
+      bestGap = gap;
+    }
+  }
+  if (!best) return null;
+  const name = `${letter.toUpperCase()}-${number}`;
+  return { ...best, name, nameUr: name };
+}
+
 export function findArea(text: string): Area | null {
   const key = canonicalText(text);
   if (!key) return null;
-  const sector = text.match(/\b([defghi])\s*-?\s*(\d{1,2})/i);
+  const sector = text.match(SECTOR_PATTERN);
   const sectorKey = sector ? canonicalText(`${sector[1]}-${sector[2]}`) : null;
-  return (
-    AREAS.find((a) => {
-      const roman = canonicalText(a.name);
-      return roman === key || roman === sectorKey || canonicalText(a.nameUr) === key;
-    }) ?? null
+  const exact = AREAS.find((a) => {
+    const roman = canonicalText(a.name);
+    return roman === key || roman === sectorKey || canonicalText(a.nameUr) === key;
+  });
+  if (exact) return exact;
+  const contained = BY_LONGEST_NAME.find(
+    (a) => hasPhrase(key, canonicalText(a.name)) || hasPhrase(key, canonicalText(a.nameUr)),
   );
+  if (contained) return contained;
+  return sector ? nearestSector(sector[1] as string, Number(sector[2])) : null;
 }

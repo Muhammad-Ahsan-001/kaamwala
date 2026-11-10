@@ -94,6 +94,10 @@ export const WorkerCard = z.object({
   cnicChecked: z.boolean().optional(),
   /** This phone completed an OTP sign-in. OTP delivery is mocked. */
   phoneChecked: z.boolean().optional(),
+  /** As the worker said it, e.g. "Subah 9 se shaam 6". The API always sends this. */
+  workingHours: z.string().nullable().optional(),
+  /** Past-work photo URLs. The API always sends this. */
+  photos: z.array(z.string()).optional(),
 });
 export type WorkerCard = z.infer<typeof WorkerCard>;
 
@@ -157,8 +161,14 @@ export const HirerCard = z.object({
   rating: z.number(),
   ratingCount: z.number().int(),
   tags: z.array(z.object({ tag: z.string(), count: z.number().int() })),
+  /** Completed jobs by trade. The API always sends this; it is optional only so existing fixtures keep compiling. */
+  jobTypes: z.array(z.object({ categoryId: z.string(), count: z.number().int() })).optional(),
 });
 export type HirerCard = z.infer<typeof HirerCard>;
+
+/** Which single answer a re-recorded or re-typed reply is for. See POST /ai/onboard. */
+export const OnboardField = z.enum(["name", "trade", "skills", "years", "rate", "area", "workingHours"]);
+export type OnboardField = z.infer<typeof OnboardField>;
 
 export const WorkerProfileDraft = z.object({
   name: z.string().nullable(),
@@ -281,8 +291,21 @@ export const Crew = z.object({
   categoryIds: z.array(z.string()),
   rate: z.number().int(),
   available: z.boolean(), // true only when every member is available
+  /** People invited who have not answered yet. They are not in members and are never booked. */
+  pendingCount: z.number().int().optional(),
 });
 export type Crew = z.infer<typeof Crew>;
+
+/** An invitation waiting for this worker's answer. */
+export const CrewInvite = z.object({
+  crewId: z.string(),
+  crewName: z.string(),
+  leaderName: z.string(),
+  categoryIds: z.array(z.string()),
+  rate: z.number().int(),
+  invitedAt: z.string(),
+});
+export type CrewInvite = z.infer<typeof CrewInvite>;
 
 export const Review = z.object({
   id: z.string(),
@@ -353,6 +376,11 @@ export type WsEvent = z.infer<typeof WsEvent>;
  *
  * Crews
  *   GET /crews?categoryId   GET /crews/:id   POST /crews   POST /crews/:id/members
+ *   Anyone named in memberIds or added by workerId or phone is invited, and joins only by accepting.
+ *   Crew.members lists accepted members only, Crew.pendingCount counts the rest.
+ *   GET  /crews/invites            -> {items: CrewInvite[]} this worker's invitations
+ *   POST /crews/:id/accept         POST /crews/:id/decline
+ *   POST /crews/:id/leave          409 CREW_JOB_ACTIVE during a job of this crew, 422 for the leader
  *
  * Jobs
  *   POST /jobs                    {mode, workerId?, crewId?, categoryId, description, area, location, ...}
@@ -415,9 +443,28 @@ export type WsEvent = z.infer<typeof WsEvent>;
  *   are charged. 409 NO_DAYS_COMPLETED when none are done; cancel instead.
  *   POST /jobs/:id/cancel returns 409 DAYS_ALREADY_COMPLETED once a day has been paid.
  *
+ * Who sees what
+ *   Exact location and full name go only to the customer, workers on the job and admins. On an open
+ *   job, workers who may bid get customerName as a first name and location rounded to about 1 km.
+ *   A worker whose offer was rejected loses access to the job; GET /jobs/:id/offers still shows
+ *   them their own offer with its status.
+ *   Message.audioUrl and Review.audioUrl are signed links that stop working after an hour. Refetch
+ *   the message or review to get a new one.
+ *
+ * Limits
+ *   Text fields on /jobs/:id/messages, /ai/onboard and /ai/problem are capped at 2000 characters
+ *   (413 TEXT_TOO_LONG). A customer may hold 3 unanswered direct or crew requests at once
+ *   (409 TOO_MANY_REQUESTS). An unanswered request expires after 30 minutes, an idle negotiation after 12 hours.
+ *   photoUrl and photoUrls must be URLs returned by this API's upload routes.
+ *
+ * POST /ai/onboard also takes field (one of OnboardField) to read a reply answering only that
+ * question. Only that part of the draft is filled in.
+ *
  * Open crew jobs: POST /jobs {mode: "crew"} with no crewId is published for crews to bid on.
  * A crew leader offers with POST /jobs/:id/offers {price, crewId}.
  *
  * Errors worth handling: 409 WORKER_NOT_AVAILABLE, 409 WORKER_ENGAGED, 422 BELOW_FLOOR,
- * 409 CNIC_DUPLICATE, 503 AI_UNAVAILABLE (audio or image could not be processed).
+ * 409 CNIC_DUPLICATE, 503 AI_UNAVAILABLE (audio or image could not be processed),
+ * 422 WRONG_TRADE, 422 CANNOT_HIRE_SELF, 409 TOO_MANY_REQUESTS, 409 PHONE_IN_USE,
+ * 409 CARD_OUTDATED (the job card's start date passed: generate a new card).
  */

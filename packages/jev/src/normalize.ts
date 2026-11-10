@@ -122,17 +122,29 @@ export function tokenize(text: string): string[] {
   return cleaned ? cleaned.split(/\s+/) : [];
 }
 
+const ENGLISH_ENDINGS = ["ings", "ers", "ing", "iti", "er", "ed", "s"];
+const MIN_STEM = 4;
+
+/** English endings on a canonical word. "iti" is -ity after canonicalRoman has folded it. */
+export function englishStem(canon: string): string {
+  for (const ending of ENGLISH_ENDINGS) {
+    if (canon.endsWith(ending) && canon.length - ending.length >= MIN_STEM) return canon.slice(0, -ending.length);
+  }
+  return canon;
+}
+
 export interface TokenForm {
   raw: string;
   canon: string;
   skeleton: string;
   urdu: boolean;
+  stem: string;
 }
 
 export function tokenForm(raw: string): TokenForm {
   const urdu = isUrduScript(raw);
   const canon = canonicalRoman(urdu ? urduToRoman(raw) : raw);
-  return { raw, canon, skeleton: skeleton(canon), urdu };
+  return { raw, canon, skeleton: skeleton(canon), urdu, stem: urdu ? canon : englishStem(canon) };
 }
 
 /** One spelling-independent string for a phrase, used to merge trust tags and similar labels. */

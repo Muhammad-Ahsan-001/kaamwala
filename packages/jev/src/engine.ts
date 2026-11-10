@@ -1,7 +1,7 @@
 import { tokenScore } from "./fuzzy";
 import { RUPEE_UNITS, STOP_WORDS, YEAR_UNITS, readAmount, readCount } from "./language";
-import { canonicalRoman, normalizeUrdu, tokenForm, tokenize, type TokenForm } from "./normalize";
-import type { JevCategory, JevMatch, JevProfileHints, JevResult } from "./types";
+import { canonicalRoman, isUrduScript, normalizeUrdu, tokenForm, tokenize, type TokenForm } from "./normalize";
+import type { JevCategory, JevMatch, JevProfileField, JevProfileHints, JevResult } from "./types";
 
 interface Term {
   display: string;
@@ -24,8 +24,13 @@ const WEIGHT_SKILL = 0.85;
 const PHRASE_TOKEN_MIN = 0.7;
 const PHRASE_GAP = 1;
 const BEST_THRESHOLD = 0.4;
+/** Jev is synchronous on the main thread, so no single text may be long enough to stall it. */
+const MAX_TEXT_CHARS = 4000;
+/** No adjacent open-ended whitespace runs: this one is walked on untrusted text. */
+const SECTOR_PATTERN = /\b([defghi])[\s-]{0,4}(\d{1,2})(?:\s{0,2}\/\s{0,2}(\d))?\b/i;
 
 const round = (n: number) => Math.round(n * 1000) / 1000;
+const bounded = (text: string) => text.slice(0, MAX_TEXT_CHARS);
 
 function buildTerm(display: string, categoryId: string, skill: string | null, weight: number): Term | null {
   const tokens = tokenize(display);
@@ -89,7 +94,7 @@ export class Jev {
 
   match(text: string, options: MatchOptions = {}): JevResult {
     const limit = options.limit ?? 5;
-    const tokens = tokenize(text);
+    const tokens = tokenize(bounded(text));
     const forms = tokens.map(tokenForm);
     const hits = this.findHits(tokens, forms);
 
@@ -110,11 +115,13 @@ export class Jev {
     });
 
     const top = matches[0];
+    // An exact tie would otherwise be settled by dictionary order, which means nothing.
+    const tied = scored.length > 1 && scored[0]?.score === scored[1]?.score;
     return {
       input: text,
       tokens,
       matches,
-      best: top && top.confidence >= BEST_THRESHOLD ? top : null,
+      best: top && !tied && top.confidence >= BEST_THRESHOLD ? top : null,
     };
   }
 
@@ -145,7 +152,8 @@ export class Jev {
   }
 
   /** Best-effort reading of a typed or transcribed self-introduction. Empty when nothing is found. */
-  parseProfile(text: string, options: { areas?: string[] } = {}): JevProfileHints {
+  parseProfile(raw: string, options: { areas?: string[] } = {}): JevProfileHints {
+    const text = bounded(raw);
     const tokens = tokenize(text);
     return {
       name: this.findName(text, tokens),
@@ -153,6 +161,21 @@ export class Jev {
       rate: this.findRate(tokens),
       area: this.findArea(text, tokens, options.areas ?? []),
     };
+  }
+
+  /**
+   * Reads a reply that answers one question, such as "پانچ" when asked for years of experience.
+   * Only that field is filled, and a bare number is taken as the answer.
+   */
+  parseField(raw: string, field: JevProfileField, options: { areas?: string[] } = {}): JevProfileHints {
+    const text = bounded(raw);
+    const tokens = tokenize(text);
+    const hints: JevProfileHints = { name: null, years: null, rate: null, area: null };
+    if (field === "name") hints.name = this.findName(text, tokens) ?? bareName(text);
+    if (field === "years") hints.years = this.findYears(tokens) ?? firstCount(tokens, 70);
+    if (field === "rate") hints.rate = this.findRate(tokens) ?? firstAmount(tokens);
+    if (field === "area") hints.area = this.findArea(text, tokens, options.areas ?? []);
+    return hints;
   }
 
   private findHits(tokens: string[], forms: TokenForm[]): Hit[] {
@@ -286,7 +309,7 @@ export class Jev {
   }
 
   private findArea(text: string, tokens: string[], areas: string[]): string | null {
-    const sector = text.match(/\b([defghi])\s*-?\s*(\d{1,2})(?:\s*\/\s*(\d))?\b/i);
+    const sector = text.match(SECTOR_PATTERN);
     if (sector?.[1] && sector[2]) {
       const base = `${sector[1].toUpperCase()}-${sector[2]}`;
       return sector[3] ? `${base}/${sector[3]}` : base;
@@ -311,4 +334,30 @@ function titleCase(s: string): string {
     .split(/\s+/)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(" ");
+}
+
+const MAX_NAME_WORDS = 4;
+
+function bareName(text: string): string | null {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (!words.length || words.length > MAX_NAME_WORDS || /\d/.test(text)) return null;
+  return isUrduScript(text) ? words.join(" ") : titleCase(words.join(" "));
+}
+
+function firstCount(tokens: string[], max: number): number | null {
+  for (const token of tokens) {
+    const count = readCount(token);
+    if (count !== null && count <= max) return count;
+  }
+  return null;
+}
+
+const MIN_RATE = 50;
+
+function firstAmount(tokens: string[]): number | null {
+  for (let i = 0; i < tokens.length; i++) {
+    const value = readAmount(tokens, i)?.value;
+    if (value !== undefined && value >= MIN_RATE) return value;
+  }
+  return null;
 }

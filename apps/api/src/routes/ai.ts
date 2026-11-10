@@ -1,4 +1,4 @@
-import type { ProblemAnalysis, WorkerProfileDraft } from "@kaamwala/contracts";
+import { OnboardField, type ProblemAnalysis, type WorkerProfileDraft } from "@kaamwala/contracts";
 import { detectUrgency, extractDurationDays } from "@kaamwala/jev";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -7,7 +7,7 @@ import { requireAuth } from "../auth";
 import { prisma } from "../db";
 import { MAX_DURATION_DAYS } from "../domain/days";
 import { env } from "../env";
-import { aiUnavailable, badRequest } from "../errors";
+import { AppError, aiUnavailable, badRequest } from "../errors";
 import {
   GeminiUnavailable,
   analyseProblem,
@@ -16,37 +16,55 @@ import {
   type ProblemExtract,
 } from "../gemini";
 import { getActiveCategories, jev } from "../jev";
-import { imageForAi, readBody, type FilePart } from "../uploads";
+import { MAX_TEXT_CHARS, imageForAi, readBody, type FilePart } from "../uploads";
 
 const aiLimit = { rateLimit: { max: env.RATE_LIMIT_AI_PER_MIN, timeWindow: "1 minute" } };
 
 const VOICE_UNAVAILABLE = "Voice could not be processed right now. Please type instead.";
 const IMAGE_UNAVAILABLE = "The photo could not be read right now. Please describe the problem in words.";
 
-/** Gemini's reading goes through Jev so trades and skills always resolve to admin-managed categories. */
-function buildDraft(transcript: string, ai: OnboardingExtract | null): WorkerProfileDraft {
+/**
+ * Gemini's reading goes through Jev so trades and skills always resolve to admin-managed categories.
+ * Jev picks a trade only when Gemini gave none, and never adds one to a valid answer.
+ */
+export function buildDraft(transcript: string, ai: OnboardingExtract | null, field: OnboardField | null): WorkerProfileDraft {
   const match = jev.match(transcript);
-  const hints = jev.parseProfile(transcript, { areas: AREA_NAMES });
-  const categoryIds = [
-    ...new Set([
-      ...(ai?.categoryIds.filter((id) => jev.hasCategory(id)) ?? []),
-      ...(match.best ? [match.best.categoryId] : []),
-    ]),
-  ];
+  const areas = { areas: AREA_NAMES };
+  const hints =
+    field === "name" || field === "years" || field === "rate" || field === "area"
+      ? jev.parseField(transcript, field, areas)
+      : jev.parseProfile(transcript, areas);
+  const fromAi = ai?.categoryIds.filter((id) => jev.hasCategory(id)) ?? [];
+  const categoryIds = fromAi.length ? [...new Set(fromAi)] : match.best ? [match.best.categoryId] : [];
   const skills = jev.normalizeSkills(
-    [...(ai?.skills ?? []), ...(match.best?.skills.map((s) => s.skill) ?? [])],
+    [...(ai?.skills ?? []), ...categoryIds.flatMap((id) => jev.skillsFor(transcript, id))],
     categoryIds,
   );
-  return {
+  const draft: WorkerProfileDraft = {
     name: ai?.name ?? hints.name,
     categoryIds,
     skills,
     years: ai?.years ?? hints.years,
     rate: ai?.rate ?? hints.rate,
     area: ai?.area ?? hints.area,
-    workingHours: ai?.workingHours ?? null,
+    workingHours: ai?.workingHours ?? (field === "workingHours" ? transcript.trim() || null : null),
     transcript,
     source: ai ? "gemini" : "jev_only",
+  };
+  return field ? onlyField(draft, field) : draft;
+}
+
+/** A correction of one answer must not disturb the others. */
+function onlyField(draft: WorkerProfileDraft, field: OnboardField): WorkerProfileDraft {
+  return {
+    ...draft,
+    name: field === "name" ? draft.name : null,
+    categoryIds: field === "trade" ? draft.categoryIds : [],
+    skills: field === "skills" || field === "trade" ? draft.skills : [],
+    years: field === "years" ? draft.years : null,
+    rate: field === "rate" ? draft.rate : null,
+    area: field === "area" ? draft.area : null,
+    workingHours: field === "workingHours" ? draft.workingHours : null,
   };
 }
 
@@ -65,11 +83,13 @@ async function priceEstimate(categoryId: string | null): Promise<{ min: number |
   return { min: Math.max(floor, at(0.25)), max: Math.max(floor, at(0.75)) };
 }
 
-async function buildAnalysis(text: string | null, ai: ProblemExtract | null): Promise<ProblemAnalysis> {
+export async function buildAnalysis(text: string | null, ai: ProblemExtract | null): Promise<ProblemAnalysis> {
   const evidence = [text, ai?.transcript, ai?.summary].filter(Boolean).join(" ");
   const match = jev.match(evidence);
   const aiCategory = ai?.categoryId && jev.hasCategory(ai.categoryId) ? ai.categoryId : null;
-  const categoryId = aiCategory ?? match.best?.categoryId ?? null;
+  // Gemini saying "none of these fits" is an answer. Only its absence, or an unknown id, falls back to Jev.
+  const declined = ai !== null && ai.categoryId === null;
+  const categoryId = aiCategory ?? (declined ? null : (match.best?.categoryId ?? null));
   const fromJev = categoryId ? jev.skillsFor(evidence, categoryId) : [];
   const skills = categoryId ? jev.normalizeSkills([...(ai?.skills ?? []), ...fromJev], [categoryId]) : [];
   const estimate = await priceEstimate(categoryId);
@@ -83,10 +103,12 @@ async function buildAnalysis(text: string | null, ai: ProblemExtract | null): Pr
     urgency: ai?.urgency ?? detectUrgency(evidence),
     priceMin: clamp(ai?.priceMin ?? null) ?? estimate.min,
     priceMax: clamp(ai?.priceMax ?? null) ?? estimate.max,
-    durationDays:
-      ai?.durationDays && ai.durationDays >= 1 && ai.durationDays <= MAX_DURATION_DAYS
+    // Gemini is told not to guess this, so its null stands. Jev reads the words only when Gemini is away.
+    durationDays: ai
+      ? ai.durationDays && ai.durationDays >= 1 && ai.durationDays <= MAX_DURATION_DAYS
         ? ai.durationDays
-        : extractDurationDays(evidence),
+        : null
+      : extractDurationDays(evidence),
     summary: ai?.summary ?? (text ?? "").slice(0, 160),
     confidence: Math.min(1, Math.max(0, ai?.confidence ?? match.best?.confidence ?? 0)),
     source: ai ? "gemini" : "jev_only",
@@ -131,15 +153,16 @@ export async function aiRoutes(app: FastifyInstance) {
     const text = body.fields.text?.trim() || null;
     assertAudio(body.audio);
     if (!body.audio && !text) throw badRequest("INPUT_REQUIRED", "Send audio or text.");
+    const field = body.fields.field ? OnboardField.parse(body.fields.field) : null;
 
     try {
-      const ai = await extractOnboarding({ audio: body.audio, text });
-      return buildDraft(ai.transcript || text || "", ai);
+      const ai = await extractOnboarding({ audio: body.audio, text, field });
+      return buildDraft(ai.transcript || text || "", ai, field);
     } catch (err) {
       if (!(err instanceof GeminiUnavailable)) throw err;
       // Typed text still works through Jev. Audio cannot be understood without Gemini, so say so.
       if (body.audio && !text) throw aiUnavailable(VOICE_UNAVAILABLE);
-      return buildDraft(text as string, null);
+      return buildDraft(text as string, null, field);
     }
   });
 
@@ -150,9 +173,15 @@ export async function aiRoutes(app: FastifyInstance) {
     assertAudio(body.audio);
     if (!body.audio && !rawImage && !text) throw badRequest("INPUT_REQUIRED", "Send audio, a photo or text.");
 
-    const image: FilePart | null = rawImage
-      ? { data: await imageForAi(rawImage.data), mimetype: "image/jpeg" }
-      : null;
+    let image: FilePart | null = null;
+    if (rawImage) {
+      try {
+        image = await imageForAi(rawImage.data);
+      } catch (err) {
+        // An unreadable photo should not cost the customer the words or the voice note sent with it.
+        if (!(err instanceof AppError) || (!text && !body.audio)) throw err;
+      }
+    }
 
     try {
       const ai = await analyseProblem({ audio: body.audio, image, text });
@@ -165,7 +194,7 @@ export async function aiRoutes(app: FastifyInstance) {
   });
 
   app.post("/ai/tts-text", { preHandler: requireAuth }, async (req) => {
-    const body = z.object({ draft: DraftBody.optional(), text: z.string().optional() }).parse(req.body);
+    const body = z.object({ draft: DraftBody.optional(), text: z.string().max(MAX_TEXT_CHARS).optional() }).parse(req.body);
     return { text: body.text ?? readBackLine(body.draft ?? {}) };
   });
 }

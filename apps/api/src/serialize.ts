@@ -17,6 +17,7 @@ import type { Category, Earning, Message, Prisma, Review, User, WorkerProfile } 
 import { prisma } from "./db";
 import { averageResponseMinutes, onTimeRate, wasOnTime } from "./domain/trust";
 import { distanceKm, fromDateOnly } from "./geo";
+import { signedAudioUrl } from "./uploads";
 
 const oneDecimal = (n: number) => Math.round(n * 10) / 10;
 
@@ -145,6 +146,8 @@ export function toWorkerCard(
     trust,
     cnicChecked,
     phoneChecked: w.user.phoneVerifiedAt !== null,
+    workingHours: w.workingHours,
+    photos: w.photos,
     ...(origin ? { distanceKm: oneDecimal(distanceKm(origin, { lat: w.lat, lng: w.lng })) } : {}),
   };
 }
@@ -168,8 +171,9 @@ export async function workerCard(id: string): Promise<WorkerCard | null> {
 export async function hirerCard(userId: string): Promise<HirerCard | null> {
   const user = await prisma.user.findUnique({ where: { id: userId }, include: { hirerProfile: true } });
   if (!user) return null;
-  const [jobCount, reviews] = await Promise.all([
+  const [jobCount, jobTypes, reviews] = await Promise.all([
     prisma.job.count({ where: { customerId: userId, status: "completed" } }),
+    prisma.job.groupBy({ by: ["categoryId"], where: { customerId: userId, status: "completed" }, _count: { _all: true } }),
     prisma.review.findMany({
       where: { revieweeId: userId, direction: "worker_to_customer" },
       select: { rating: true, tags: true },
@@ -184,6 +188,7 @@ export async function hirerCard(userId: string): Promise<HirerCard | null> {
     rating: reviews.length ? oneDecimal(reviews.reduce((s, r) => s + r.rating, 0) / reviews.length) : 0,
     ratingCount: reviews.length,
     tags: tallyTags(reviews.map((r) => r.tags)),
+    jobTypes: jobTypes.map((t) => ({ categoryId: t.categoryId, count: t._count._all })),
   };
 }
 
@@ -232,11 +237,24 @@ export const toJob = (j: JobFull): JobDto => ({
   })),
 });
 
+const AREA_PRECISION = 100;
+const toArea = (n: number) => Math.round(n * AREA_PRECISION) / AREA_PRECISION;
+
+/**
+ * What a worker who is not on the job sees of an open job: enough to decide whether to bid.
+ * The customer's full name and exact location stay private until an offer is accepted.
+ */
+export const toOpenJobView = (j: JobFull): JobDto => ({
+  ...toJob(j),
+  customerName: (j.customer.name ?? "").trim().split(/\s+/)[0] ?? "",
+  location: { lat: toArea(j.lat), lng: toArea(j.lng) },
+});
+
 export const toMessage = (m: Message): MessageDto => ({
   id: m.id,
   jobId: m.jobId,
   senderId: m.senderId,
-  audioUrl: m.audioUrl,
+  audioUrl: signedAudioUrl(m.audioUrl),
   transcript: m.transcript,
   text: m.text,
   createdAt: m.createdAt.toISOString(),
@@ -247,7 +265,7 @@ export const toReview = (r: Review): ReviewDto => ({
   jobId: r.jobId,
   direction: r.direction,
   rating: r.rating,
-  audioUrl: r.audioUrl,
+  audioUrl: signedAudioUrl(r.audioUrl),
   transcript: r.transcript,
   tags: r.tags,
   createdAt: r.createdAt.toISOString(),
@@ -279,7 +297,11 @@ export async function toOffers(offers: OfferFull[]): Promise<OfferDto[]> {
   }));
 }
 
-export const crewInclude = { members: { include: { worker: { include: { user: true } } } } } satisfies Prisma.CrewInclude;
+/** Only people who said yes appear on a crew. Invitations are counted, never named. */
+export const crewInclude = {
+  members: { where: { status: "accepted" }, include: { worker: { include: { user: true } } } },
+  _count: { select: { members: { where: { status: "invited" } } } },
+} satisfies Prisma.CrewInclude;
 type CrewFull = Prisma.CrewGetPayload<{ include: typeof crewInclude }>;
 
 export async function toCrews(crews: CrewFull[]): Promise<CrewDto[]> {
@@ -295,6 +317,7 @@ export async function toCrews(crews: CrewFull[]): Promise<CrewDto[]> {
       categoryIds: c.categoryIds,
       rate: c.rate,
       available: members.length > 0 && members.every((m) => m.status === "available" && m.approved),
+      pendingCount: c._count.members,
     };
   });
 }

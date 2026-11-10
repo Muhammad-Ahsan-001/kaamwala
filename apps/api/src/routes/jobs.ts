@@ -6,7 +6,7 @@ import { prisma } from "../db";
 import { MAX_DURATION_DAYS, isValidStartDate, jobFacts } from "../domain/days";
 import {
   acceptOffer,
-  assertCanView,
+  assertCanReadMessages,
   cancelJob,
   completeDay,
   completeJob,
@@ -27,33 +27,51 @@ import {
 import { env } from "../env";
 import { aiUnavailable, badRequest, conflict, forbidden, notFound } from "../errors";
 import { GeminiUnavailable, summariseReview, transcribe } from "../gemini";
+import { todayPkt } from "../geo";
 import { hub } from "../hub";
 import { jev } from "../jev";
+import { perUserLimit } from "../limits";
 import { pushToUsers } from "../push";
 import { jobInclude, toMessage, toReview } from "../serialize";
-import { readBody, saveAudio, saveImage, type FilePart } from "../uploads";
+import { assertAudioFile, isOwnImageUrl, readBody, saveAudio, saveImage, type FilePart } from "../uploads";
 
 const aiLimit = { rateLimit: { max: env.RATE_LIMIT_AI_PER_MIN, timeWindow: "1 minute" } };
+const SCHEDULE_GRACE_MS = 5 * 60 * 1000;
 
 const Id = z.object({ id: z.string() });
-const CreateJob = z.object({
-  mode: z.enum(["direct", "open", "crew"]),
-  workerId: z.string().optional(),
-  crewId: z.string().optional(),
-  categoryId: z.string(),
-  description: z.string().trim().min(1).max(2000),
-  area: z.string().trim().min(1).max(120),
-  location: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }),
-  urgency: z.enum(["low", "normal", "urgent"]).optional(),
-  scheduledFor: z.string().datetime().optional(),
-  photoUrls: z.array(z.string().url()).max(6).optional(),
-  proposedPrice: z.number().int().positive().optional(),
-  durationDays: z.number().int().min(1).max(MAX_DURATION_DAYS).default(1),
-  startDate: z
-    .string()
-    .refine((d) => isValidStartDate(d), { message: "The start date must be today or within the next 14 days." })
-    .optional(),
-});
+const CreateJob = z
+  .object({
+    mode: z.enum(["direct", "open", "crew"]),
+    workerId: z.string().optional(),
+    crewId: z.string().optional(),
+    categoryId: z.string(),
+    description: z.string().trim().min(1).max(2000),
+    area: z.string().trim().min(1).max(120),
+    location: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }),
+    urgency: z.enum(["low", "normal", "urgent"]).optional(),
+    scheduledFor: z.string().datetime().optional(),
+    photoUrls: z.array(z.string().url().refine(isOwnImageUrl, { message: "Upload the photo first." })).max(6).optional(),
+    proposedPrice: z.number().int().positive().optional(),
+    durationDays: z.number().int().min(1).max(MAX_DURATION_DAYS).default(1),
+    startDate: z
+      .string()
+      .refine((d) => isValidStartDate(d), { message: "The start date must be today or within the next 14 days." })
+      .optional(),
+  })
+  .superRefine((body, ctx) => {
+    if (!body.scheduledFor) return;
+    const at = new Date(body.scheduledFor);
+    const day = todayPkt(at);
+    const fail = (message: string) => ctx.addIssue({ code: "custom", message, path: ["scheduledFor"] });
+    if (at.getTime() < Date.now() - SCHEDULE_GRACE_MS) fail("The scheduled time has already passed.");
+    else if (!isValidStartDate(day)) fail("The scheduled time must be today or within the next 14 days.");
+    else if (body.startDate && body.startDate !== day) fail("The scheduled time must fall on the start date.");
+  })
+  // A time on its own fixes the day, so the card and the booked days can never disagree.
+  .transform((body) => ({
+    ...body,
+    startDate: body.startDate ?? (body.scheduledFor ? todayPkt(new Date(body.scheduledFor)) : undefined),
+  }));
 const CreateOffer = z.object({
   price: z.number().int().positive(),
   etaMinutes: z.number().int().positive().max(10_080).optional(),
@@ -92,14 +110,14 @@ async function transcribeNote(messageId: string, audio: FilePart, audience: stri
 export async function jobRoutes(app: FastifyInstance) {
   const auth = { preHandler: requireAuth };
 
-  app.post("/uploads/image", auth, async (req) => {
+  app.post("/uploads/image", { ...auth, config: perUserLimit(env.RATE_LIMIT_UPLOADS_PER_MIN) }, async (req) => {
     const body = await readBody(req);
     const image = body.images[0];
     if (!image) throw badRequest("IMAGE_REQUIRED", "Attach a photo.");
     return { url: (await saveImage(image.data)).url };
   });
 
-  app.post("/jobs", auth, async (req, reply) => {
+  app.post("/jobs", { ...auth, config: perUserLimit(env.RATE_LIMIT_JOBS_PER_MIN) }, async (req, reply) => {
     return reply.code(201).send(await createJob(authOf(req), CreateJob.parse(req.body)));
   });
 
@@ -147,7 +165,7 @@ export async function jobRoutes(app: FastifyInstance) {
     const { id } = Id.parse(req.params);
     const job = await prisma.job.findUnique({ where: { id }, include: jobInclude });
     if (!job) throw notFound("Job");
-    await assertCanView(authOf(req), job);
+    assertCanReadMessages(authOf(req), job);
     const rows = await prisma.message.findMany({ where: { jobId: id }, orderBy: { createdAt: "asc" } });
     return { items: rows.map(toMessage) };
   });
@@ -163,6 +181,7 @@ export async function jobRoutes(app: FastifyInstance) {
     const text = body.fields.text?.trim() || null;
     if (!body.audio && !text) throw badRequest("INPUT_REQUIRED", "Send a voice note or text.");
 
+    // Stored as a file name. toMessage turns it into a short-lived signed link.
     const audioUrl = body.audio ? await saveAudio(body.audio.data, body.audio.mimetype) : null;
     const match = text ? jev.match(text) : null;
     const message = await prisma.message.create({
@@ -208,6 +227,8 @@ export async function jobRoutes(app: FastifyInstance) {
     const fields = Fields.parse(body.fields);
     const tapped = parseTags(fields.tags);
     if (!body.audio && fields.rating === undefined) throw badRequest("RATING_REQUIRED", "Tap a rating or record a review.");
+    // Checked first, so a file that is not audio never costs a model call.
+    if (body.audio) assertAudioFile(body.audio.data, body.audio.mimetype);
 
     let transcript: string | null = null;
     let aiTags: string[] = [];

@@ -63,6 +63,11 @@ enum JobDayStatus {
   skipped
 }
 
+enum CrewMemberStatus {
+  invited
+  accepted
+}
+
 /// Payment collection is mocked. No real money moves, and this is the only status.
 enum AgentPaymentStatus {
   mock_collected
@@ -212,15 +217,19 @@ model Crew {
   offers  Offer[]
 }
 
+/// Nobody joins a crew without saying yes. Only accepted members are booked or shown.
 model CrewMember {
-  id       String        @id @default(cuid())
-  crewId   String
-  crew     Crew          @relation(fields: [crewId], references: [id], onDelete: Cascade)
-  workerId String
-  worker   WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  id        String           @id @default(cuid())
+  crewId    String
+  crew      Crew             @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  workerId  String
+  worker    WorkerProfile    @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  status    CrewMemberStatus @default(invited)
+  invitedAt DateTime         @default(now())
 
   @@unique([crewId, workerId])
   @@index([workerId])
+  @@index([workerId, status])
 }
 
 model Job {

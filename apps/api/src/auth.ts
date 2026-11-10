@@ -11,6 +11,8 @@ const secret = new TextEncoder().encode(env.JWT_SECRET);
 export interface Claims {
   sub: string;
   role: Role;
+  /** Seconds since the epoch. */
+  exp: number | null;
 }
 
 export async function signToken(userId: string, role: Role): Promise<string> {
@@ -25,7 +27,7 @@ export async function signToken(userId: string, role: Role): Promise<string> {
 export async function verifyToken(token: string): Promise<Claims | null> {
   try {
     const { payload } = await jwtVerify(token, secret, { algorithms: ["HS256"] });
-    return payload.sub ? { sub: payload.sub, role: payload.role as Role } : null;
+    return payload.sub ? { sub: payload.sub, role: payload.role as Role, exp: payload.exp ?? null } : null;
   } catch {
     return null;
   }

@@ -18,13 +18,16 @@ import { categoryRoutes } from "./routes/categories";
 import { crewRoutes } from "./routes/crews";
 import { customerRoutes } from "./routes/customers";
 import { jobRoutes } from "./routes/jobs";
+import { mediaRoutes } from "./routes/media";
 import { pushRoutes } from "./routes/push";
 import { settingsRoutes } from "./routes/settings";
 import { workerRoutes } from "./routes/workers";
 import { wsRoutes } from "./routes/ws";
+import { isAudioPath } from "./media";
 import { uploadRoot } from "./uploads";
 
 const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+const MAX_FORM_FIELD_BYTES = 16 * 1024;
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -56,16 +59,21 @@ export async function buildApp(): Promise<FastifyInstance> {
     methods: ["GET", "POST", "PATCH", "OPTIONS"],
   });
   await app.register(rateLimit, { global: false });
-  await app.register(multipart, { limits: { fileSize: MAX_UPLOAD_BYTES, files: 6, fields: 20 } });
+  await app.register(multipart, { limits: { fileSize: MAX_UPLOAD_BYTES, files: 6, fields: 20, fieldSize: MAX_FORM_FIELD_BYTES } });
   await app.register(websocket);
 
   mkdirSync(uploadRoot, { recursive: true });
   await app.register(fastifyStatic, {
     root: uploadRoot,
     prefix: "/uploads/",
-    setHeaders: (res) => {
+    // Without this the plugin's own max-age=0 header replaces the one set below.
+    cacheControl: false,
+    // Voice notes share the folder but are private. They are served only through signed links.
+    // This check also runs for reply.sendFile, which is how the signed route sends them.
+    allowedPath: (pathName, _root, request) => !isAudioPath(pathName) || request.url.startsWith("/v1/media/audio/"),
+    setHeaders: (res, filePath) => {
       res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-      res.setHeader("Cache-Control", "public, max-age=604800, immutable");
+      res.setHeader("Cache-Control", isAudioPath(filePath) ? "private, no-store" : "public, max-age=604800, immutable");
     },
   });
 
@@ -104,6 +112,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await v1.register(customerRoutes);
       await v1.register(crewRoutes);
       await v1.register(jobRoutes);
+      await v1.register(mediaRoutes);
       await v1.register(pushRoutes);
       await v1.register(settingsRoutes);
       await v1.register(adminRoutes);

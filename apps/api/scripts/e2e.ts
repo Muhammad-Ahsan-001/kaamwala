@@ -3,12 +3,12 @@
  * Run on a freshly seeded dev database: pnpm db:seed, start the server, then pnpm e2e.
  */
 import type { Job, WorkerCard, WsEvent } from "@kaamwala/contracts";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "../src/db";
+import { openJobRecipients } from "../src/domain/openJobs";
 
 const BASE = process.env.E2E_BASE ?? "http://127.0.0.1:3002";
 const API = `${BASE}/v1`;
 const G9 = { lat: 33.6885, lng: 73.0345 };
-const prisma = new PrismaClient();
 
 let passed = 0;
 const failures: string[] = [];
@@ -54,9 +54,19 @@ interface Session {
   workerId: string | null;
 }
 
+/** Sign-in is rate limited per address, and this script signs in far more often than a person does. */
+async function waitOutLimit(call: () => Promise<Res>): Promise<Res> {
+  let res = await call();
+  while (res.status === 429) {
+    await sleep(3000);
+    res = await call();
+  }
+  return res;
+}
+
 async function login(phone: string, role?: string): Promise<Session> {
-  const otp = await api("POST", "/auth/otp/request", { body: { phone } });
-  const res = await api("POST", "/auth/otp/verify", { body: { phone, otp: otp.body.devOtp, role } });
+  const otp = await waitOutLimit(() => api("POST", "/auth/otp/request", { body: { phone } }));
+  const res = await waitOutLimit(() => api("POST", "/auth/otp/verify", { body: { phone, otp: otp.body.devOtp, role } }));
   if (res.status !== 200) throw new Error(`login failed for ${phone}: ${JSON.stringify(res.body)}`);
   return { token: res.body.token, userId: res.body.user.id, workerId: res.body.user.workerId };
 }
@@ -70,11 +80,26 @@ const statusOf = async (id: string) => (await api<WorkerCard>("GET", `/workers/$
 
 class Listener {
   events: WsEvent[] = [];
+  closeCode: number | null = null;
   private socket: WebSocket;
 
   constructor(token?: string) {
     this.socket = new WebSocket(`${BASE.replace("http", "ws")}/v1/ws${token ? `?token=${token}` : ""}`);
     this.socket.onmessage = (e) => this.events.push(JSON.parse(String(e.data)) as WsEvent);
+    this.socket.onclose = (e) => (this.closeCode = e.code);
+  }
+
+  jobEvents(jobId: string): Job[] {
+    return this.events.flatMap((e) => (e.type === "job.updated" && e.job.id === jobId ? [e.job] : []));
+  }
+
+  async closedWith(code: number, timeoutMs = 3000) {
+    const end = Date.now() + timeoutMs;
+    while (Date.now() < end) {
+      if (this.closeCode === code) return true;
+      await sleep(25);
+    }
+    return false;
   }
 
   ready() {
@@ -118,9 +143,10 @@ const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
   "base64",
 );
+const WEBM = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(2044, 7)]);
 const audioForm = (extra: Record<string, string> = {}) => {
   const form = new FormData();
-  form.append("audio", new Blob([Buffer.alloc(2048, 7)], { type: "audio/webm;codecs=opus" }), "note.webm");
+  form.append("audio", new Blob([WEBM], { type: "audio/webm;codecs=opus" }), "note.webm");
   for (const [k, v] of Object.entries(extra)) form.append(k, v);
   return form;
 };
@@ -286,6 +312,12 @@ async function main() {
   check("phone is marked checked once OTP completes", afterOtp.body.phoneChecked === true, afterOtp.body.phoneChecked);
   const keptEntry = await entryFor(withCnic.body.id);
   check("OTP sign-in does not add another entry", keptEntry?.fee === 200 && (await ledgerCount()) === count0 + 1, keptEntry);
+  const wrongCnicLater = await api("POST", `/workers/me/cnic?forWorkerId=${withCnic.body.id}`, {
+    token: agent.token,
+    body: { cnic: "61101-1234567-1" },
+  });
+  check("a later mistyped CNIC is refused", wrongCnicLater.status === 409 && wrongCnicLater.body.error.code === "CNIC_DUPLICATE", wrongCnicLater);
+  check("and does not undo a signup that already passed", (await api("GET", `/workers/${withCnic.body.id}`)).status === 200 && (await entryFor(withCnic.body.id)) !== null);
 
   section("Admin fee settings");
   const adminForSettings = await login("+923000000001");
@@ -407,7 +439,7 @@ async function main() {
   const text = await api("POST", `/jobs/${direct.body.id}/messages`, { token: customer.token, body: { text: "Kal subah aa jayen" } });
   check("text message sends", text.status === 201 && text.body.text === "Kal subah aa jayen", text);
   const voice = await api("POST", `/jobs/${direct.body.id}/messages`, { token: worker.token, form: audioForm() });
-  check("voice note is stored", voice.status === 201 && voice.body.audioUrl?.includes("/uploads/"), voice);
+  check("voice note is stored", voice.status === 201 && voice.body.audioUrl?.includes("/media/audio/"), voice);
   check("no transcript is invented without Gemini", voice.body.transcript === null, voice.body);
   const fetched = await fetch(voice.body.audioUrl);
   check("voice note can be played back", fetched.status === 200, fetched.status);
@@ -456,6 +488,7 @@ async function main() {
   check("worker rates the hirer", back.status === 201 && back.body.direction === "worker_to_customer", back);
   const hirer = await api("GET", `/customers/${customer.userId}`, { token: worker.token });
   check("hirer profile shows the rating and tags", hirer.body.rating === 4 && hirer.body.tags[0].tag === "waqt par adaigi" && hirer.body.jobCount === 1, hirer.body);
+  check("hirer profile shows the kinds of work booked", hirer.body.jobTypes?.[0]?.categoryId === "electrician" && hirer.body.jobTypes?.[0]?.count === 1, hirer.body.jobTypes);
 
   check("worker returns to available automatically", await anon.sawStatus(worker.workerId as string, "available", 12_000));
   const next = (await api("GET", `/workers?lat=${G9.lat}&lng=${G9.lng}&radiusKm=30&q=pankha`)).body.items.find(
@@ -850,6 +883,8 @@ async function main() {
   const floorEdit = await api("PATCH", `/admin/categories/${created.body.id}`, { token: admin.token, body: { floorPrice: 400, step: 25 } });
   check("admin sets floor and step", floorEdit.body.floorPrice === 400 && floorEdit.body.step === 25, floorEdit.body);
   await api("PATCH", `/admin/categories/${created.body.id}`, { token: admin.token, body: { active: false } });
+  check("a disabled trade's workers leave a filtered search", (await searchIds(`categoryId=${created.body.id}`)).length === 0);
+  check("and leave an unfiltered search", !(await searchIds("")).includes(tailorCard.body.id));
   const gone = await api("POST", "/ai/problem", { token: customer.token, body: { text: "darzi chahiye" } });
   check("disabling removes it from matching", gone.body.categoryId === null, gone.body);
   const publicNow = await api("GET", "/categories");
@@ -902,10 +937,14 @@ async function main() {
   check("typed CNIC is accepted", cnicA.status === 200, cnicA);
   const stored = await prisma.cnicHash.findUnique({ where: { workerId: worker.workerId as string } });
   check("only a 64-character hash is stored", stored?.hash.length === 64 && !stored.hash.includes("6110112345671"), stored);
-  const dup = await api("POST", "/workers/me/cnic", { token: urduWorker.token, body: { cnic: "6110112345671" } });
-  check("duplicate CNIC is blocked", dup.status === 409 && dup.body.error.code === "CNIC_DUPLICATE", dup);
   const bad = await api("POST", "/workers/me/cnic", { token: urduWorker.token, body: { cnic: "123" } });
   check("malformed CNIC is refused", bad.status === 422, bad);
+  const dupSession = await login("+923007000031", "worker");
+  const dupCard = await api<WorkerCard>("POST", "/workers", { token: dupSession.token, body: { name: "Doosra Banda", area: "G-9", trade: "plumber" } });
+  const dup = await api("POST", "/workers/me/cnic", { token: dupSession.token, body: { cnic: "6110112345671" } });
+  check("duplicate CNIC is blocked", dup.status === 409 && dup.body.error.code === "CNIC_DUPLICATE", dup);
+  check("a self-signup with someone else's CNIC does not stay live", (await api("GET", `/workers/${dupCard.body.id}`)).status === 404);
+  check("and is gone from search", !(await searchIds("categoryId=plumber")).includes(dupCard.body.id));
 
   section("Without a Gemini key");
   const voiceOnboard = await api("POST", "/ai/onboard", { token: worker.token, form: audioForm() });
@@ -1029,6 +1068,363 @@ async function main() {
     .catch(() => true);
   check("the database index refuses a second active job on its own", indexRefused);
   await api("POST", `/jobs/${hold.body.id}/cancel`, { token: c1.token });
+
+  section("Regression: who can see an open job");
+  const buyer = await login("+923007002001", "customer");
+  await api("POST", "/customers", { token: buyer.token, body: { name: "Bushra Naveed Khan", area: "G-9" } });
+  const exactSpot = { lat: 33.68853, lng: 73.03457 };
+
+  const karachi = await login("+923007002002", "worker");
+  await api("POST", "/workers", {
+    token: karachi.token,
+    body: { name: "Karachi Bijli Wala", area: "Clifton", location: { lat: 24.82, lng: 67.03 }, categoryIds: ["electrician"] },
+  });
+  const noProfile = await login("+923007002003", "worker");
+  const switched = await login("+923007002004", "worker");
+  await api("POST", "/workers", { token: switched.token, body: { name: "Kirdar Badalne Wala", area: "G-9", categoryIds: ["electrician"] } });
+  await login("+923007002004", "customer");
+
+  const nearSocket = new Listener(asif.token);
+  const noProfileSocket = new Listener(noProfile.token);
+  const farSocket = new Listener(karachi.token);
+  const otherTradeSocket = new Listener(nadeem.token);
+  const switchedSocket = new Listener(switched.token);
+  const quietSockets = [noProfileSocket, farSocket, otherTradeSocket, switchedSocket];
+  await Promise.all([nearSocket, ...quietSockets].map((l) => l.ready()));
+
+  const privateJob = await api<Job>("POST", "/jobs", { token: buyer.token, body: jobBody({ mode: "open", location: exactSpot }) });
+  const privateId = privateJob.body.id;
+  await sleep(400);
+  const told = nearSocket.jobEvents(privateId)[0];
+  check("a nearby worker in the trade hears about the open job", told !== undefined);
+  check("the socket gives the area, not the exact spot", told?.location.lat === 33.69 && told?.location.lng === 73.03, told?.location);
+  check("the socket gives a first name only", told?.customerName === "Bushra", told?.customerName);
+  check("no socket hears of it without a matching profile, trade, radius and role", quietSockets.every((l) => l.jobEvents(privateId).length === 0), quietSockets.map((l) => l.jobEvents(privateId).length));
+  quietSockets.forEach((l) => l.close());
+
+  const buyerView = await api<Job>("GET", `/jobs/${privateId}`, { token: buyer.token });
+  check("the customer still sees the exact spot and full name", buyerView.body.location.lat === exactSpot.lat && buyerView.body.customerName === "Bushra Naveed Khan", buyerView.body);
+  const nearView = await api<Job>("GET", `/jobs/${privateId}`, { token: asif.token });
+  check("a matching worker opens it as a reduced view", nearView.status === 200 && nearView.body.location.lat === 33.69 && nearView.body.customerName === "Bushra", nearView.body);
+  const feedView = ((await api("GET", "/jobs/open", { token: asif.token })).body.items as Job[]).find((j) => j.id === privateId);
+  check("the feed gives the same reduced view", feedView?.location.lng === 73.03 && feedView?.customerName === "Bushra", feedView);
+  check("a far worker cannot open it by id", (await api("GET", `/jobs/${privateId}`, { token: karachi.token })).status === 403);
+  check("a worker in another trade cannot open it by id", (await api("GET", `/jobs/${privateId}`, { token: nadeem.token })).status === 403);
+  const farBid = await api("POST", `/jobs/${privateId}/offers`, { token: karachi.token, body: { price: 900 } });
+  check("a far worker cannot bid", farBid.status === 403, farBid);
+
+  section("Regression: a rejected bidder loses the job");
+  const loserOffer = await api("POST", `/jobs/${privateId}/offers`, { token: asif.token, body: { price: 900 } });
+  const winnerOffer = await api("POST", `/jobs/${privateId}/offers`, { token: shahid.token, body: { price: 800 } });
+  await api("POST", `/jobs/${privateId}/offers/${winnerOffer.body.id}/accept`, { token: buyer.token });
+  nearSocket.events.length = 0;
+  await api("POST", `/jobs/${privateId}/messages`, { token: buyer.token, body: { text: "Ghar number 12, 0300 1234567" } });
+  await api("POST", `/jobs/${privateId}/price`, { token: buyer.token, body: { direction: "up" } });
+  await sleep(300);
+  check("the rejected bidder cannot read the chat", (await api("GET", `/jobs/${privateId}/messages`, { token: asif.token })).status === 403);
+  check("the winner can", (await api("GET", `/jobs/${privateId}/messages`, { token: shahid.token })).body.items?.length === 1);
+  check("the rejected bidder cannot open the job", (await api("GET", `/jobs/${privateId}`, { token: asif.token })).status === 403);
+  const loserMine = (await api("GET", "/jobs/mine", { token: asif.token })).body.items as Job[];
+  check("the job leaves the rejected bidder's list", !loserMine.some((j) => j.id === privateId));
+  check("the rejected bidder gets no more job updates", nearSocket.jobEvents(privateId).length === 0, nearSocket.jobEvents(privateId).length);
+  const loserOffers = (await api("GET", `/jobs/${privateId}/offers`, { token: asif.token })).body.items;
+  check("the rejected bidder can still see their own result", loserOffers.length === 1 && loserOffers[0].id === loserOffer.body.id && loserOffers[0].status === "rejected", loserOffers);
+  nearSocket.close();
+  await api("POST", `/jobs/${privateId}/cancel`, { token: buyer.token });
+
+  section("Regression: crews need consent");
+  const founder = await login("+923007002010", "worker");
+  await api("POST", "/workers", { token: founder.token, body: { name: "Crew Banane Wala", area: "G-9", categoryIds: ["mistri"] } });
+  const founderId = (await login("+923007002010")).workerId as string;
+  const invitee = await login("+923007002011", "worker");
+  const inviteeCard = await api<WorkerCard>("POST", "/workers", { token: invitee.token, body: { name: "Bila Ijazat", area: "G-9", categoryIds: ["labourer"] } });
+  const phoneInvitee = await login("+923007002012", "worker");
+  await api("POST", "/workers", { token: phoneInvitee.token, body: { name: "Phone Wala Banda", area: "G-9", categoryIds: ["labourer"] } });
+
+  const formed = await api("POST", "/crews", {
+    token: founder.token,
+    body: { name: "Consent Crew", categoryIds: ["mistri"], rate: 5000, memberIds: [inviteeCard.body.id] },
+  });
+  const consentId = formed.body.id;
+  check("naming someone only invites them", formed.status === 201 && formed.body.members.length === 1 && formed.body.pendingCount === 1, formed.body);
+  const byPhone = await api("POST", `/crews/${consentId}/members`, { token: founder.token, body: { phone: "+923007002012" } });
+  check("adding by phone reveals nothing about that person", byPhone.status === 200 && !JSON.stringify(byPhone.body).includes("Phone Wala") && byPhone.body.pendingCount === 2, byPhone.body);
+  const unknownPhone = await api("POST", `/crews/${consentId}/members`, { token: founder.token, body: { phone: "+923007002099" } });
+  check("an unregistered phone gets the same answer", unknownPhone.status === 200 && unknownPhone.body.pendingCount === 2, unknownPhone);
+
+  const beforeConsent = await api<Job>("POST", "/jobs", { token: buyer.token, body: jobBody({ mode: "crew", crewId: consentId, categoryId: "mistri" }) });
+  check("a booking takes accepted members only", beforeConsent.status === 201 && beforeConsent.body.workerIds.join() === founderId, beforeConsent.body.workerIds);
+  check("an invited worker is not reserved", (await statusOf(inviteeCard.body.id)) === "available");
+  await api("POST", `/jobs/${beforeConsent.body.id}/cancel`, { token: buyer.token });
+
+  const invites = await api("GET", "/crews/invites", { token: invitee.token });
+  check("the invited worker sees the invitation", invites.body.items.length === 1 && invites.body.items[0].crewName === "Consent Crew", invites.body);
+  const joined = await api("POST", `/crews/${consentId}/accept`, { token: invitee.token });
+  check("accepting joins the crew", joined.status === 200 && joined.body.members.length === 2 && joined.body.pendingCount === 1, joined.body);
+  const declined2 = await api("POST", `/crews/${consentId}/decline`, { token: phoneInvitee.token });
+  check("declining removes the invitation", declined2.status === 200 && (await api("GET", `/crews/${consentId}`)).body.pendingCount === 0, declined2);
+  check("nobody can accept without an invitation", (await api("POST", `/crews/${consentId}/accept`, { token: phoneInvitee.token })).status === 404);
+
+  const afterConsent = await api<Job>("POST", "/jobs", { token: buyer.token, body: jobBody({ mode: "crew", crewId: consentId, categoryId: "mistri" }) });
+  check("an accepted member is booked with the crew", afterConsent.body.workerIds.length === 2 && (await statusOf(inviteeCard.body.id)) === "requested", afterConsent.body.workerIds);
+  const leaveDuring = await api("POST", `/crews/${consentId}/leave`, { token: invitee.token });
+  check("a member cannot leave during the crew's job", leaveDuring.status === 409 && leaveDuring.body.error.code === "CREW_JOB_ACTIVE", leaveDuring);
+  await api("POST", `/jobs/${afterConsent.body.id}/cancel`, { token: buyer.token });
+  const left = await api("POST", `/crews/${consentId}/leave`, { token: invitee.token });
+  check("a member can leave afterwards", left.status === 200 && (await api("GET", `/crews/${consentId}`)).body.members.length === 1, left);
+  const leaderLeaves = await api("POST", `/crews/${consentId}/leave`, { token: founder.token });
+  check("the leader cannot leave", leaderLeaves.status === 422, leaderLeaves);
+  const ownCrew = await api("POST", "/jobs", { token: founder.token, body: jobBody({ mode: "crew", crewId: consentId, categoryId: "mistri" }) });
+  check("a leader cannot book their own crew", ownCrew.status === 422 && ownCrew.body.error.code === "CANNOT_HIRE_SELF", ownCrew);
+
+  section("Regression: open crew jobs follow the crew's trades");
+  const labourJob = await api<Job>("POST", "/jobs", { token: buyer.token, body: jobBody({ mode: "crew", categoryId: "labourer", description: "Saman uthana hai" }) });
+  const riazFeed = (await api("GET", "/jobs/open", { token: leader.token })).body.items as Job[];
+  check("a leader sees crew work in the crew's trade", riazFeed.some((j) => j.id === labourJob.body.id), riazFeed.length);
+  const zubairFeed = (await api("GET", "/jobs/open", { token: member.token })).body.items as Job[];
+  check("a member who leads nothing does not", !zubairFeed.some((j) => j.id === labourJob.body.id));
+  await api("POST", `/jobs/${labourJob.body.id}/cancel`, { token: buyer.token });
+
+  const plumbScope = { mode: "crew" as const, categoryId: "plumber", ...G9 };
+  const rashid = await login("+923100000008");
+  const readyFlag = async () => (await openJobRecipients(plumbScope)).find((r) => r.userId === rashid.userId)?.ready;
+  check("a free crew's leader is ready for an open-job push", (await readyFlag()) === true, await readyFlag());
+  await api("POST", "/workers/me/availability", { token: rashid.token, body: { available: false } });
+  check("an offline leader gets no open-job push", (await readyFlag()) === false, await readyFlag());
+  await api("POST", "/workers/me/availability", { token: rashid.token, body: { available: true } });
+  await api("POST", "/workers/me/availability", { token: racer.token, body: { available: false } });
+  check("nor does a leader with a busy member", (await readyFlag()) === false, await readyFlag());
+  await api("POST", "/workers/me/availability", { token: racer.token, body: { available: true } });
+  const farScope = { mode: "crew" as const, categoryId: "plumber", lat: 24.82, lng: 67.03 };
+  check("nor does a leader out of range", !(await openJobRecipients(farScope)).some((r) => r.userId === rashid.userId));
+
+  section("Regression: abandoned requests expire");
+  const adnan = await login("+923100000014");
+  const bilal = await login("+923100000015");
+  const acJob = (extra: Record<string, unknown>) => jobBody({ categoryId: "ac-technician", description: "AC theek karna hai", ...extra });
+  const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000);
+
+  const abandoned = await api<Job>("POST", "/jobs", { token: buyer.token, body: acJob({ mode: "direct", workerId: adnan.workerId }) });
+  await prisma.job.update({ where: { id: abandoned.body.id }, data: { updatedAt: minutesAgo(31) } });
+  anon.events.length = 0;
+  check("an unanswered request frees the worker", await anon.sawStatus(adnan.workerId as string, "available", 8000));
+  check("and is cancelled", (await api<Job>("GET", `/jobs/${abandoned.body.id}`, { token: buyer.token })).body.status === "cancelled");
+
+  const stalled = await api<Job>("POST", "/jobs", { token: buyer.token, body: acJob({ mode: "direct", workerId: bilal.workerId }) });
+  await api("POST", `/jobs/${stalled.body.id}/accept`, { token: bilal.token });
+  await api("POST", `/jobs/${stalled.body.id}/messages`, { token: buyer.token, body: { text: "Kal baat karte hain" } });
+  await prisma.job.update({ where: { id: stalled.body.id }, data: { updatedAt: minutesAgo(13 * 60) } });
+  await sleep(6500);
+  check("a negotiation with a recent message stays open", (await api<Job>("GET", `/jobs/${stalled.body.id}`, { token: buyer.token })).body.status === "negotiating");
+  await prisma.message.updateMany({ where: { jobId: stalled.body.id }, data: { createdAt: minutesAgo(13 * 60) } });
+  anon.events.length = 0;
+  check("an idle negotiation frees the worker", await anon.sawStatus(bilal.workerId as string, "available", 8000));
+  check("and is cancelled too", (await api<Job>("GET", `/jobs/${stalled.body.id}`, { token: buyer.token })).body.status === "cancelled");
+
+  section("Regression: one customer cannot hoard workers");
+  const carpenterIds = (await searchIds("categoryId=carpenter")).slice(0, 4);
+  const woodJob = (workerId: string) => jobBody({ mode: "direct", workerId, categoryId: "carpenter", description: "Darwaza theek karna hai" });
+  const held3: Res<Job>[] = [];
+  for (const id of carpenterIds.slice(0, 3)) held3.push(await api<Job>("POST", "/jobs", { token: buyer.token, body: woodJob(id) }));
+  check("three requests can wait at once", held3.every((r) => r.status === 201), held3.map((r) => r.status));
+  const fourth = await api("POST", "/jobs", { token: buyer.token, body: woodJob(carpenterIds[3] as string) });
+  check("a fourth is refused", fourth.status === 409 && fourth.body.error.code === "TOO_MANY_REQUESTS", fourth);
+  for (const r of held3) await api("POST", `/jobs/${r.body.id}/cancel`, { token: buyer.token });
+  const limited = await fetch(`${API}/jobs`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${buyer.token}`, "content-type": "application/json" },
+    body: JSON.stringify(jobBody({ mode: "open" })),
+  });
+  check("POST /jobs is rate limited", Number(limited.headers.get("x-ratelimit-limit")) > 0, limited.headers.get("x-ratelimit-limit"));
+  await api("POST", `/jobs/${((await limited.json()) as Job).id}/cancel`, { token: buyer.token });
+  const uploadLimited = await fetch(`${API}/uploads/image`, { method: "POST", headers: { authorization: `Bearer ${buyer.token}` }, body: imageForm() });
+  check("POST /uploads/image is rate limited", Number(uploadLimited.headers.get("x-ratelimit-limit")) > 0, uploadLimited.headers.get("x-ratelimit-limit"));
+
+  section("Regression: trades and self-hire");
+  const wrongDirect = await api("POST", "/jobs", { token: buyer.token, body: jobBody({ mode: "direct", workerId: nadeem.workerId }) });
+  check("a worker cannot be booked for another trade", wrongDirect.status === 422 && wrongDirect.body.error.code === "WRONG_TRADE", wrongDirect);
+  const wrongCrew = await api("POST", "/jobs", { token: buyer.token, body: jobBody({ mode: "crew", crewId: pindi.id, categoryId: "painter" }) });
+  check("a crew cannot be booked for another trade", wrongCrew.status === 422 && wrongCrew.body.error.code === "WRONG_TRADE", wrongCrew);
+  const ownRawal = await api("POST", "/jobs", { token: saleem.token, body: jobBody({ mode: "crew", crewId: rawal.id, categoryId: "painter" }) });
+  check("a seeded leader cannot book his own crew", ownRawal.status === 422 && ownRawal.body.error.code === "CANNOT_HIRE_SELF", ownRawal);
+
+  section("Regression: an agent cannot take over an account");
+  const takeover = await api("POST", "/workers", {
+    token: agent.token,
+    body: { name: "Galat Naam", area: "I-8", trade: "mistri", forPhone: "+923007000001" },
+  });
+  check("a phone with an account is refused", takeover.status === 409 && takeover.body.error.code === "PHONE_IN_USE", takeover);
+  const stillCustomer = await api("GET", "/me", { token: customer.token });
+  check("its name and role are untouched", stillCustomer.body.user.name === "Rabia Anwar" && stillCustomer.body.user.role === "customer" && stillCustomer.body.worker === null, stillCustomer.body.user);
+
+  section("Regression: disputes during multi-day work");
+  const disputedCrew = await api<Job>("POST", "/jobs", { token: buyer.token, body: jobBody({ mode: "crew", crewId: crew.id, categoryId: "mistri", durationDays: 3 }) });
+  const disputedId = disputedCrew.body.id;
+  const disputedAccepted = await api<Job>("POST", `/jobs/${disputedId}/accept`, { token: leader.token });
+  await agreeAndEngage(disputedAccepted.body, buyer, leader);
+  await api("POST", `/jobs/${disputedId}/days/1/complete`, { token: leader.token });
+  const memberDispute = await api("POST", `/jobs/${disputedId}/dispute`, { token: member.token, body: { reason: "Mujhe nahi karna" } });
+  check("a crew member cannot end the job by disputing it", memberDispute.status === 403, memberDispute);
+  const partial = await api<Job>("POST", `/jobs/${disputedId}/dispute`, { token: buyer.token, body: { reason: "Kaam theek nahi hua" } });
+  check("the total drops to the days worked", partial.body.status === "disputed" && partial.body.totalPrice === 6500, partial.body);
+  check("the remaining days are skipped", partial.body.days?.map((d) => d.status).join() === "completed,skipped,skipped", partial.body.days);
+  check("the crew is released", (await Promise.all(memberIds.map(statusOf))).every((s) => s === "available"));
+  const partialResolved = await api<Job>("POST", `/admin/disputes/${disputedId}/resolve`, { token: admin.token, body: { resolution: "Ek din ki adaigi." } });
+  check("a job with paid days resolves as completed", partialResolved.body.status === "completed" && partialResolved.body.completedAt !== null && partialResolved.body.totalPrice === 6500, partialResolved.body);
+  const partialReview = await api("POST", `/jobs/${disputedId}/reviews`, { token: buyer.token, body: { rating: 3 } });
+  check("and can be reviewed", partialReview.status === 201, partialReview);
+
+  const abdul = await login("+923100000017");
+  const unworked = await api<Job>("POST", "/jobs", { token: buyer.token, body: woodJob(abdul.workerId as string) });
+  const unworkedAccepted = await api<Job>("POST", `/jobs/${unworked.body.id}/accept`, { token: abdul.token });
+  await agreeAndEngage(unworkedAccepted.body, buyer, abdul);
+  await api("POST", `/jobs/${unworked.body.id}/dispute`, { token: abdul.token, body: { reason: "Pata galat tha" } });
+  const unworkedResolved = await api<Job>("POST", `/admin/disputes/${unworked.body.id}/resolve`, { token: admin.token, body: { resolution: "Koi kaam nahi hua." } });
+  check("a job with no paid day resolves as cancelled", unworkedResolved.body.status === "cancelled" && unworkedResolved.body.completedAt === null, unworkedResolved.body);
+
+  section("Regression: job cards and dates");
+  const yousaf = await login("+923100000018");
+  const datedJob = await api<Job>("POST", "/jobs", { token: buyer.token, body: { ...woodJob(yousaf.workerId as string), durationDays: 2 } });
+  const datedId = datedJob.body.id;
+  await api("POST", `/jobs/${datedId}/accept`, { token: yousaf.token });
+  await api("POST", `/jobs/${datedId}/card`, { token: buyer.token });
+  await api("POST", `/jobs/${datedId}/confirm`, { token: buyer.token });
+  const secondCard = await api<Job>("POST", `/jobs/${datedId}/card`, { token: yousaf.token });
+  check("a second card request cannot undo a confirmation", secondCard.body.status === "pending_confirmation" && secondCard.body.customerConfirmed === true, secondCard.body);
+
+  const dateOnly = (n: number) => new Date(`${plusDays(n)}T00:00:00.000Z`);
+  await prisma.job.update({ where: { id: datedId }, data: { startDate: dateOnly(-3) } });
+  const staleConfirm = await api("POST", `/jobs/${datedId}/confirm`, { token: yousaf.token });
+  check("a card whose dates have passed cannot be confirmed", staleConfirm.status === 409 && staleConfirm.body.error.code === "CARD_OUTDATED", staleConfirm);
+  const voided = await api<Job>("GET", `/jobs/${datedId}`, { token: buyer.token });
+  check("it is voided and the job moves to today", voided.body.status === "negotiating" && voided.body.card === null && voided.body.startDate === karachiToday && voided.body.customerConfirmed === false, voided.body);
+
+  await prisma.job.update({ where: { id: datedId }, data: { startDate: dateOnly(-3) } });
+  const freshCard = await api<Job>("POST", `/jobs/${datedId}/card`, { token: yousaf.token });
+  check("a new card starts today", freshCard.body.card?.startDate === karachiToday && freshCard.body.startDate === karachiToday && freshCard.body.card?.time.includes(karachiToday) === true, freshCard.body.card);
+  await api("POST", `/jobs/${datedId}/confirm`, { token: buyer.token });
+  const freshEngaged = await api<Job>("POST", `/jobs/${datedId}/confirm`, { token: yousaf.token });
+  check("no booked day is in the past", freshEngaged.body.status === "engaged" && freshEngaged.body.days?.[0]?.date === karachiToday, freshEngaged.body.days);
+  await api("POST", `/jobs/${datedId}/cancel`, { token: buyer.token });
+
+  const noon = (n: number) => `${plusDays(n)}T07:00:00.000Z`;
+  for (const [name, extra] of [
+    ["a time beyond 14 days", { scheduledFor: "2030-06-01T10:00:00Z" }],
+    ["a time in the past", { scheduledFor: "2025-01-01T10:00:00Z" }],
+    ["a time on another day than the start date", { scheduledFor: noon(2), startDate: plusDays(1) }],
+  ] as const) {
+    const res = await api("POST", "/jobs", { token: buyer.token, body: jobBody({ mode: "open", ...extra }) });
+    check(`POST /jobs rejects ${name}`, res.status === 400, res);
+  }
+  const timed = await api<Job>("POST", "/jobs", { token: buyer.token, body: jobBody({ mode: "open", scheduledFor: noon(1) }) });
+  check("a scheduled time sets the start date", timed.status === 201 && timed.body.startDate === plusDays(1), timed.body);
+  await api("POST", `/jobs/${timed.body.id}/cancel`, { token: buyer.token });
+
+  section("Regression: uploads and text limits");
+  const haroon = await login("+923100000019");
+  const chatJob = await api<Job>("POST", "/jobs", { token: buyer.token, body: woodJob(haroon.workerId as string) });
+  await api("POST", `/jobs/${chatJob.body.id}/accept`, { token: haroon.token });
+  const note = await api("POST", `/jobs/${chatJob.body.id}/messages`, { token: buyer.token, form: audioForm() });
+  const noteUrl = new URL(note.body.audioUrl as string);
+  const noteName = noteUrl.pathname.split("/").pop() as string;
+  check("a voice note comes back as a signed link", note.status === 201 && noteUrl.pathname.includes("/v1/media/audio/") && noteUrl.searchParams.has("sig"), note.body.audioUrl);
+  const notePlay = await fetch(noteUrl);
+  check("the signed link plays, privately", notePlay.status === 200 && notePlay.headers.get("cache-control") === "private, no-store", [notePlay.status, notePlay.headers.get("cache-control")]);
+  check("the link without its signature is refused", [400, 403].includes((await fetch(`${BASE}${noteUrl.pathname}`)).status));
+  noteUrl.searchParams.set("sig", "A".repeat(43));
+  check("a forged signature is refused", (await fetch(noteUrl)).status === 403);
+  noteUrl.searchParams.set("exp", "1000000000");
+  check("an expired link is refused", (await fetch(noteUrl)).status === 403);
+  check("the public uploads route no longer serves voice notes", (await fetch(`${BASE}/uploads/${noteName}`)).status === 404);
+
+  const notAudio = new FormData();
+  notAudio.append("audio", new Blob([Buffer.from("<html>not audio</html>")], { type: "audio/mpeg" }), "note.mp3");
+  const fakeAudio = await api("POST", `/jobs/${chatJob.body.id}/messages`, { token: buyer.token, form: notAudio });
+  check("a file that is not audio is refused", fakeAudio.status === 415 && fakeAudio.body.error.code === "INVALID_AUDIO", fakeAudio);
+
+  const tooLong = "bijlx ".repeat(400);
+  const longMessage = await api("POST", `/jobs/${chatJob.body.id}/messages`, { token: buyer.token, body: { text: tooLong } });
+  check("a message over the limit is refused", longMessage.status === 413 && longMessage.body.error.code === "TEXT_TOO_LONG", longMessage);
+  const longOnboard = await api("POST", "/ai/onboard", { token: worker.token, body: { text: tooLong } });
+  check("onboarding text over the limit is refused", longOnboard.status === 413, longOnboard);
+  const longProblem = await api("POST", "/ai/problem", { token: buyer.token, body: { text: tooLong } });
+  check("problem text over the limit is refused", longProblem.status === 413, longProblem);
+  const longInForm = new FormData();
+  longInForm.append("text", tooLong);
+  const longMultipart = await api("POST", "/ai/problem", { token: buyer.token, form: longInForm });
+  check("the limit also holds for multipart", longMultipart.status === 413, longMultipart);
+  await api("POST", `/jobs/${chatJob.body.id}/cancel`, { token: buyer.token });
+
+  for (const [name, photoUrl] of [
+    ["another site's URL", "https://attacker.example/p.png"],
+    ["a data URL", "data:text/html,hello"],
+    ["a script URL", "javascript:alert(1)"],
+  ] as const) {
+    const res = await api("PATCH", "/workers/me", { token: worker.token, body: { photoUrl } });
+    check(`a profile photo cannot be ${name}`, res.status === 400, res);
+  }
+  const externalCustomer = await api("POST", "/customers", { token: buyer.token, body: { name: "Bushra Naveed Khan", photoUrl: "https://attacker.example/p.png" } });
+  check("nor can a customer's", externalCustomer.status === 400, externalCustomer);
+  const externalJobPhoto = await api("POST", "/jobs", { token: buyer.token, body: jobBody({ mode: "open", photoUrls: ["https://attacker.example/p.png"] }) });
+  check("nor a job photo", externalJobPhoto.status === 400, externalJobPhoto);
+  const ownPhoto = await api<WorkerCard>("PATCH", "/workers/me", { token: worker.token, body: { photoUrl: upload.body.url } });
+  check("a photo from the upload route is accepted", ownPhoto.status === 200 && ownPhoto.body.photoUrl === upload.body.url, ownPhoto);
+  const fullCard = await api<WorkerCard>("GET", `/workers/${urduWorker.workerId ?? urdu.body.id}`);
+  check("past-work photos and hours are on the card", Array.isArray(fullCard.body.photos) && (fullCard.body.photos as string[]).length === 1 && "workingHours" in fullCard.body, fullCard.body.photos);
+
+  section("Regression: reading words");
+  const askJev = async (q: string, extra = "") => (await api("GET", `/workers?q=${encodeURIComponent(q)}${extra}`)).body;
+  check("a question about coming tomorrow picks no trade", (await askJev("kya koi aa sakta hai")).detected === null);
+  check("a generic word picks no trade", (await askJev("TV band ho gaya")).detected === null);
+  check("safai now means the maid", (await askJev("safai chahiye")).detected?.categoryId === "home-maid");
+  check("English inflection is understood", (await askJev("need painting done")).detected?.categoryId === "painter");
+  const readable = await askJev("zzqq xxyy", "&categoryId=painter");
+  check("unreadable words do not empty a chosen trade", readable.items.length > 0, readable.items.length);
+  check("unreadable words alone find nobody", (await askJev("zzqq xxyy")).items.length === 0);
+  const brokenFor = await api("POST", "/ai/problem", { token: buyer.token, body: { text: "3 din se pankha kharab hai" } });
+  check("how long something has been broken is not a booking length", brokenFor.body.durationDays === null, brokenFor.body.durationDays);
+  const oneField = await api("POST", "/ai/onboard", { token: worker.token, body: { text: "پانچ", field: "years" } });
+  check("a one-word answer fills just that field", oneField.body.years === 5 && oneField.body.rate === null && oneField.body.name === null, oneField.body);
+  const badField = await api("POST", "/ai/onboard", { token: worker.token, body: { text: "panch", field: "shoe size" } });
+  check("an unknown field is refused", badField.status === 400, badField);
+  const brokenPhoto = new FormData();
+  brokenPhoto.append("image", new Blob([Buffer.from("not an image")], { type: "image/heic" }), "a.heic");
+  brokenPhoto.append("text", "nalka tapak raha hai");
+  const textSurvives = await api("POST", "/ai/problem", { token: buyer.token, form: brokenPhoto });
+  check("an unreadable photo does not lose the typed words", textSurvives.status === 200 && textSurvives.body.categoryId === "plumber", textSurvives);
+  const sectorSession = await login("+923007002020", "worker");
+  const compoundArea = await api<WorkerCard>("POST", "/workers", { token: sectorSession.token, body: { name: "Pindi Wala", area: "Saddar Rawalpindi", categoryIds: ["plumber"] } });
+  check("an area named with its city resolves", compoundArea.status === 201 && compoundArea.body.area === "Saddar", compoundArea);
+
+  section("Regression: suspension");
+  const faisal = await login("+923100000011");
+  const faisalSocket = new Listener(faisal.token);
+  await faisalSocket.ready();
+  const faisalJob = await api<Job>("POST", "/jobs", { token: buyer.token, body: acJob({ mode: "direct", workerId: faisal.workerId, durationDays: 2 }) });
+  const faisalAccepted = await api<Job>("POST", `/jobs/${faisalJob.body.id}/accept`, { token: faisal.token });
+  await agreeAndEngage(faisalAccepted.body, buyer, faisal);
+  const suspendEngaged = await api("POST", `/admin/workers/${faisal.workerId}/suspend`, { token: admin.token });
+  check("an engaged worker can be suspended", suspendEngaged.status === 200 && suspendEngaged.body.endedJobId === faisalJob.body.id, suspendEngaged);
+  check("the job ends with it", (await api<Job>("GET", `/jobs/${faisalJob.body.id}`, { token: buyer.token })).body.status === "cancelled");
+  check("the worker goes offline", (await statusOf(faisal.workerId as string)) === "offline");
+  check("their socket is closed", await faisalSocket.closedWith(4403), faisalSocket.closeCode);
+  const reconnect = new Listener(faisal.token);
+  await reconnect.ready().catch(() => undefined);
+  check("and cannot reconnect", await reconnect.closedWith(4403), reconnect.closeCode);
+  await api("POST", `/admin/workers/${faisal.workerId}/approve`, { token: admin.token });
+  check("approval brings them back", (await statusOf(faisal.workerId as string)) === "available");
+
+  const faisalPaid = await api<Job>("POST", "/jobs", { token: buyer.token, body: acJob({ mode: "direct", workerId: faisal.workerId, durationDays: 2 }) });
+  const paidAccepted = await api<Job>("POST", `/jobs/${faisalPaid.body.id}/accept`, { token: faisal.token });
+  await agreeAndEngage(paidAccepted.body, buyer, faisal);
+  await api("POST", `/jobs/${faisalPaid.body.id}/days/1/complete`, { token: faisal.token });
+  await api("POST", `/admin/workers/${faisal.workerId}/suspend`, { token: admin.token });
+  const paidEnded = await api<Job>("GET", `/jobs/${faisalPaid.body.id}`, { token: buyer.token });
+  check("a job with a paid day finishes early instead", paidEnded.body.status === "completed" && paidEnded.body.days?.map((d) => d.status).join() === "completed,skipped", paidEnded.body);
+  check("and the suspended worker stays offline", (await statusOf(faisal.workerId as string)) === "offline");
+  await sleep(6000);
+  check("the sweep does not put them back", (await statusOf(faisal.workerId as string)) === "offline");
+  await api("POST", `/admin/workers/${faisal.workerId}/approve`, { token: admin.token });
 
   section("Result");
   anon.close();

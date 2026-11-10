@@ -5,15 +5,28 @@ import type { FastifyRequest } from "fastify";
 import sharp from "sharp";
 import { env } from "./env";
 import { AppError, badRequest } from "./errors";
+import { audioBytesMatch, audioFileName, audioSignatureValid, isHeic, signAudio } from "./media";
 
 export const uploadRoot = path.resolve(env.UPLOAD_DIR);
 
-const publicUrl = (name: string) => `${env.PUBLIC_API_URL}/uploads/${name}`;
+const publicBase = env.PUBLIC_API_URL.replace(/\/+$/, "");
+const publicUrl = (name: string) => `${publicBase}/uploads/${name}`;
 
-async function store(name: string, data: Buffer): Promise<string> {
+/** Longest text field a request may carry. Everything that reads text runs on the one main thread. */
+export const MAX_TEXT_CHARS = 2000;
+const TEXT_TOO_LONG = `Please keep this under ${MAX_TEXT_CHARS} characters.`;
+const AUDIO_LINK_SECONDS = 60 * 60;
+
+async function store(name: string, data: Buffer): Promise<void> {
   await mkdir(uploadRoot, { recursive: true });
   await writeFile(path.join(uploadRoot, name), data);
-  return publicUrl(name);
+}
+
+const NOT_AN_IMAGE = "This file is not a readable image.";
+const HEIC_REFUSED = "This phone photo format (HEIC) cannot be used. Please choose a JPEG photo.";
+
+function invalidImage(input: Buffer): AppError {
+  return new AppError(415, "INVALID_IMAGE", isHeic(input) ? HEIC_REFUSED : NOT_AN_IMAGE);
 }
 
 /** Resizes, strips metadata (including GPS) and re-encodes, so the original file is never served. */
@@ -29,24 +42,39 @@ export async function saveImage(input: Buffer): Promise<{ url: string; jpeg: Buf
       base.clone().webp({ quality: 78 }).toBuffer(),
       base.clone().jpeg({ quality: 82 }).toBuffer(),
     ]);
-    return { url: await store(`${randomUUID()}.webp`, webp), jpeg };
+    const name = `${randomUUID()}.webp`;
+    await store(name, webp);
+    return { url: publicUrl(name), jpeg };
   } catch (err) {
     if (err instanceof AppError) throw err;
-    throw new AppError(415, "INVALID_IMAGE", "This file is not a readable image.");
+    throw invalidImage(input);
   }
 }
 
-/** For Gemini only: nothing is written to disk. Used for CNIC photos. */
-export async function imageForAi(input: Buffer): Promise<Buffer> {
+/**
+ * For Gemini only: nothing is written to disk. Used for CNIC photos.
+ * The prebuilt sharp cannot decode HEIC, but Gemini can, so a HEIC photo goes through unchanged.
+ */
+export async function imageForAi(input: Buffer): Promise<FilePart> {
   try {
-    return await sharp(input, { failOn: "error" })
+    const data = await sharp(input, { failOn: "error" })
       .rotate()
       .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 88 })
       .toBuffer();
+    return { data, mimetype: "image/jpeg" };
   } catch {
-    throw new AppError(415, "INVALID_IMAGE", "This file is not a readable image.");
+    if (isHeic(input)) return { data: input, mimetype: "image/heic" };
+    throw new AppError(415, "INVALID_IMAGE", NOT_AN_IMAGE);
   }
+}
+
+const OWN_IMAGE = /^[0-9a-f-]{36}\.webp$/;
+
+/** True only for a photo this API stored, so a viewer's browser never loads a third party's server. */
+export function isOwnImageUrl(url: string): boolean {
+  const prefix = `${publicBase}/uploads/`;
+  return url.startsWith(prefix) && OWN_IMAGE.test(url.slice(prefix.length));
 }
 
 const AUDIO_EXTENSIONS: Record<string, string> = {
@@ -65,11 +93,32 @@ const AUDIO_EXTENSIONS: Record<string, string> = {
 
 export const cleanMime = (mime: string) => (mime.split(";")[0] ?? "").trim().toLowerCase();
 
-export async function saveAudio(input: Buffer, mime: string): Promise<string> {
-  const ext = AUDIO_EXTENSIONS[cleanMime(mime)];
-  if (!ext) throw new AppError(415, "INVALID_AUDIO", "This audio format is not supported.");
-  return store(`${randomUUID()}.${ext}`, input);
+/** The declared type is only a claim. The first bytes have to be that kind of audio file. */
+export function assertAudioFile(input: Buffer, mime: string): string {
+  const clean = cleanMime(mime);
+  const ext = AUDIO_EXTENSIONS[clean];
+  if (!ext || !audioBytesMatch(input, clean)) {
+    throw new AppError(415, "INVALID_AUDIO", "This audio format is not supported.");
+  }
+  return ext;
 }
+
+/** Returns the stored file name. Voice notes are private, so they are read through signed links only. */
+export async function saveAudio(input: Buffer, mime: string): Promise<string> {
+  const name = `${randomUUID()}.${assertAudioFile(input, mime)}`;
+  await store(name, input);
+  return name;
+}
+
+export function signedAudioUrl(stored: string | null, nowMs: number = Date.now()): string | null {
+  if (!stored) return null;
+  const name = audioFileName(stored);
+  const expires = Math.floor(nowMs / 1000) + AUDIO_LINK_SECONDS;
+  return `${publicBase}/v1/media/audio/${name}?exp=${expires}&sig=${signAudio(env.JWT_SECRET, name, expires)}`;
+}
+
+export const audioLinkValid = (name: string, expires: number, signature: string, nowMs: number = Date.now()) =>
+  audioSignatureValid(env.JWT_SECRET, name, expires, signature, Math.floor(nowMs / 1000));
 
 export interface FilePart {
   data: Buffer;
@@ -82,7 +131,11 @@ export interface ParsedBody {
   fields: Record<string, string>;
 }
 
-/** Reads either multipart (fields `audio`, `image`) or a JSON body. */
+function assertTextLength(value: string): void {
+  if (value.length > MAX_TEXT_CHARS) throw new AppError(413, "TEXT_TOO_LONG", TEXT_TOO_LONG);
+}
+
+/** Reads either multipart (fields `audio`, `image`) or a JSON body. Every text field is length-capped. */
 export async function readBody(req: FastifyRequest): Promise<ParsedBody> {
   const result: ParsedBody = { audio: null, images: [], fields: {} };
 
@@ -90,7 +143,9 @@ export async function readBody(req: FastifyRequest): Promise<ParsedBody> {
     const body = (req.body ?? {}) as Record<string, unknown>;
     for (const [key, value] of Object.entries(body)) {
       if (value !== null && value !== undefined) {
-        result.fields[key] = typeof value === "string" ? value : JSON.stringify(value);
+        const text = typeof value === "string" ? value : JSON.stringify(value);
+        assertTextLength(text);
+        result.fields[key] = text;
       }
     }
     return result;
@@ -103,6 +158,8 @@ export async function readBody(req: FastifyRequest): Promise<ParsedBody> {
       else if (part.fieldname === "image") result.images.push({ data, mimetype: part.mimetype });
       else throw badRequest("UNKNOWN_FILE_FIELD", `Unexpected file field "${part.fieldname}".`);
     } else if (typeof part.value === "string") {
+      if (part.valueTruncated) throw new AppError(413, "TEXT_TOO_LONG", TEXT_TOO_LONG);
+      assertTextLength(part.value);
       result.fields[part.fieldname] = part.value;
     }
   }
