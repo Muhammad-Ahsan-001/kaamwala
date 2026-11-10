@@ -1,0 +1,38 @@
+[Unit]
+Description=KaamWala API (Fastify on private port 3002)
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=kaamwala
+Group=kaamwala
+WorkingDirectory=/opt/kaamwala/current
+# Lives outside the repo. Created by infra/first-time-setup.sh.
+EnvironmentFile=/etc/kaamwala/api.env
+# first-time-setup.sh rewrites this path if Node is installed somewhere else.
+ExecStart=/usr/bin/node /opt/kaamwala/current/dist/server.js
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+LimitNOFILE=65535
+SyslogIdentifier=kaamwala-api
+
+# Sandboxing. Only the uploads area is writable.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+UMask=0027
+ReadWritePaths=/var/lib/kaamwala
+
+[Install]
+WantedBy=multi-user.target

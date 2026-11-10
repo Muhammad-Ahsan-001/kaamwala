@@ -1,0 +1,2 @@
+# These files run on Linux, so they must keep LF line endings on every checkout.
+* text eol=lf

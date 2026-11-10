@@ -1,0 +1,46 @@
+# KaamWala site blocks only. first-time-setup.sh replaces __DOMAIN__ and installs
+# this as its own file, imported once from the main Caddyfile.
+
+kaamwala.__DOMAIN__ {
+	root * /var/www/kaamwala/current
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "microphone=(self), geolocation=(self), camera=(self)"
+	}
+
+	# Everything except hashed assets must revalidate, including app routes such
+	# as /app that are served from index.html, so updates reach phones.
+	@revalidate not path /assets/*
+	header @revalidate Cache-Control "no-cache"
+
+	# Vite gives these content-hashed names, so they can be cached for good.
+	@hashed path /assets/*
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+	# Single-page app: unknown paths such as /app and /admin load index.html.
+	try_files {path} /index.html
+	file_server
+}
+
+api.kaamwala.__DOMAIN__ {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		-Server
+	}
+
+	# Voice notes and photos are uploaded here.
+	request_body {
+		max_size 30MB
+	}
+
+	# Caddy proxies WebSocket upgrades (/v1/ws) automatically. The delay keeps
+	# open sockets alive across a config reload of the other sites on this box.
+	reverse_proxy 127.0.0.1:3002 {
+		stream_close_delay 5m
+	}
+}
