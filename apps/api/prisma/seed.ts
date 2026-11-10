@@ -468,6 +468,7 @@ async function main() {
     { name: "Madina Tameeraat Crew", categoryIds: ["mistri", "labourer", "electrician"], rate: 6500, members: ["Muhammad Riaz", "Gul Zaman", "Zubair Ahmed"] },
     { name: "Rawal Finishing Team", categoryIds: ["painter", "carpenter", "labourer"], rate: 5500, members: ["Saleem Akhtar", "Ghulam Mustafa", "Noor Muhammad"] },
     { name: "Pindi Pipe aur Bijli Crew", categoryIds: ["plumber", "electrician", "labourer"], rate: 4500, members: ["Rashid Ali", "Waseem Abbasi", "Sher Khan"] },
+    { name: "AI WEB FORGE", categoryIds: ["electrician", "carpenter", "plumber"], rate: 2500, members: ["Shahid Mehmood", "Yousaf Masih", "Sajid Hussain"] },
   ];
 
   const crews = [];

@@ -119,7 +119,6 @@ Jev is not an AI service. It is local code that backs up typed text and powers s
 
 - **Claude Code** (Anthropic), used to build this project.
 - **Claude** on claude.ai (Anthropic), used to produce the design mockups submitted separately.
-- **Codex** (OpenAI). `TODO: confirm` whether Codex was used on this project, and remove this line if not.
 
 ## Seeded / Mocked
 
