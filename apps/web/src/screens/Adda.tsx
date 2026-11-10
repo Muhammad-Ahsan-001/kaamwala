@@ -262,7 +262,7 @@ export function Adda() {
 
         <div className="absolute right-3 top-[72px] z-[400] flex flex-col rounded-2xl bg-surface shadow-card">
           <LangCycle />
-          <LogoutButton />
+          <LogoutButton labeled />
         </div>
 
         <div className="absolute left-3 top-3 z-[400] flex max-w-[calc(100%-5.5rem)] flex-col items-start gap-2">

@@ -16,6 +16,7 @@ import { BusyNotice, DayProgress, PriceMath } from "../ui/hire";
 import { Avatar } from "../ui/people";
 import { PriceCard } from "../ui/PriceCard";
 import { AiTag, Auto, Button, Card, Chip, EmptyState, InlineError, LinkButton, ListSkeleton, OneLine, Rating, SectionTitle, Sheet, Tag, cx } from "../ui/primitives";
+import { LogoutButton } from "../ui/LogoutButton";
 import { Screen } from "../ui/shell";
 import { Asked, QuestionVoice } from "../ui/QuestionVoice";
 import type { VoiceId } from "../lib/question-voices";
@@ -130,7 +131,55 @@ function statusWords(job: Job, isCustomer: boolean): StatusWords {
   return JOB_STATUS[job.status];
 }
 
-const ACTIVE_STATUSES: Job["status"][] = ["open", "requested", "negotiating", "pending_confirmation", "engaged"];
+type JobFilterId = "all" | "in_progress" | "discussion" | "waiting" | "completed" | "cancelled" | "disputed";
+
+/** The chips on My jobs, in list order. Finished ones share a single newest-first group in the All view. */
+const JOB_FILTERS: { id: JobFilterId; ur: string; roman: string; en: string; statuses: Job["status"][]; finished?: boolean }[] = [
+  { id: "in_progress", ur: "کام جاری", roman: "Kaam jari", en: "In progress", statuses: ["engaged"] },
+  { id: "discussion", ur: "بات چیت جاری", roman: "Baat cheet jari", en: "In discussion", statuses: ["negotiating", "pending_confirmation"] },
+  { id: "waiting", ur: "انتظار میں", roman: "Intezar mein", en: "Waiting", statuses: ["open", "requested"] },
+  { id: "completed", ur: "مکمل", roman: "Mukammal", en: "Completed", statuses: ["completed"], finished: true },
+  { id: "cancelled", ur: "منسوخ", roman: "Mansookh", en: "Cancelled", statuses: ["cancelled"], finished: true },
+  { id: "disputed", ur: "شکایت", roman: "Shikayat", en: "Disputed", statuses: ["disputed"], finished: true },
+];
+
+const newestFirst = (a: Job, b: Job) => b.createdAt.localeCompare(a.createdAt);
+
+/** What My jobs shows for a filter. A filter with no jobs left falls back to All. `finished` is only filled in the All view. */
+function arrangeJobs(list: Job[], wanted: JobFilterId) {
+  const groups = JOB_FILTERS.map((filter) => ({ ...filter, jobs: list.filter((job) => filter.statuses.includes(job.status)).sort(newestFirst) })).filter((group) => group.jobs.length > 0);
+  const chosen = groups.find((group) => group.id === wanted);
+  return {
+    filter: chosen?.id ?? ("all" as JobFilterId),
+    chips: [{ id: "all" as JobFilterId, ur: "سب", roman: "Sab", en: "All", count: list.length }, ...groups.map((group) => ({ ...group, count: group.jobs.length }))],
+    top: chosen?.jobs ?? groups.filter((group) => !group.finished).flatMap((group) => group.jobs),
+    finished: chosen ? [] : groups.filter((group) => group.finished).flatMap((group) => group.jobs).sort(newestFirst),
+  };
+}
+
+/** Per account, so coming back from a job keeps the filter but another login on this phone starts clean. */
+const rememberedJobFilter = new Map<string | undefined, JobFilterId>();
+
+function JobFilterChips({ chips, value, onChange }: { chips: ReturnType<typeof arrangeJobs>["chips"]; value: JobFilterId; onChange: (next: JobFilterId) => void }) {
+  const { t } = useSettings();
+  const row = useRef<HTMLDivElement>(null);
+
+  // A remembered filter may be far along the row.
+  useEffect(() => {
+    row.current?.querySelector('[aria-pressed="true"]')?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [value]);
+
+  return (
+    <div ref={row} className="scroll-x -mx-4 mb-3 flex gap-2 overflow-x-auto px-4" role="group" aria-label={t("کام چھانٹیں", "Kaam chhantein", "Filter jobs")}>
+      {chips.map((chip) => (
+        <Chip key={chip.id} active={chip.id === value} onClick={() => onChange(chip.id)}>
+          {t(chip.ur, chip.roman, chip.en)}
+          <span className={cx("latin rounded-full px-2 text-sm font-bold", chip.id === value ? "bg-white/20 text-white" : "bg-sunken text-soft")}>{chip.count}</span>
+        </Chip>
+      ))}
+    </div>
+  );
+}
 
 function JobRow({ job, category, isCustomer }: { job: Job; category: Category | undefined; isCustomer: boolean }) {
   const { t, lang } = useSettings();
@@ -186,11 +235,26 @@ export function MyJobs() {
   const categories = useCategories();
   const jobs = useData(() => data.listMyJobs(), [], { reloadOn: ["job.updated", "offer.created", "offer.updated"] });
   const worker = user?.role === "worker";
+  const [wanted, setWanted] = useState<JobFilterId>(() => rememberedJobFilter.get(user?.id) ?? "all");
+  const view = arrangeJobs(jobs.data ?? [], wanted);
+
+  const choose = (next: JobFilterId) => {
+    rememberedJobFilter.set(user?.id, next);
+    setWanted(next);
+  };
+
+  // A live update emptied the chosen filter. Forget it, so the list cannot jump back to it later.
+  const emptied = jobs.data !== null && view.filter !== wanted;
+  useEffect(() => {
+    if (!emptied) return;
+    rememberedJobFilter.delete(user?.id);
+    setWanted("all");
+  }, [emptied, user?.id]);
 
   const row = (job: Job) => <JobRow key={job.id} job={job} isCustomer={job.customerId === user?.id} category={categories.data?.find((c) => c.id === job.categoryId)} />;
 
   return (
-    <Screen title={t("میرے کام", "Mere kaam", "My jobs")} nav={worker ? "worker" : "customer"}>
+    <Screen title={t("میرے کام", "Mere kaam", "My jobs")} nav={worker ? "worker" : "customer"} right={<LogoutButton labeled />}>
       <CrewEntry />
       <Async query={jobs} skeleton={<ListSkeleton />}>
         {(list) => {
@@ -203,15 +267,14 @@ export function MyJobs() {
               />
             );
           }
-          const active = list.filter((job) => ACTIVE_STATUSES.includes(job.status));
-          const past = list.filter((job) => !ACTIVE_STATUSES.includes(job.status));
           return (
             <>
-              {active.length > 0 && <div className="stagger space-y-3">{active.map(row)}</div>}
-              {past.length > 0 && (
+              <JobFilterChips chips={view.chips} value={view.filter} onChange={choose} />
+              {view.top.length > 0 && <div className="stagger space-y-3">{view.top.map(row)}</div>}
+              {view.finished.length > 0 && (
                 <>
                   <SectionTitle>{t("پرانے کام", "Purane kaam", "Past jobs")}</SectionTitle>
-                  <div className="space-y-3">{past.map(row)}</div>
+                  <div className="space-y-3">{view.finished.map(row)}</div>
                 </>
               )}
             </>

@@ -386,7 +386,7 @@ export function HirerProfile() {
             <Link to="/app/settings" aria-label={t("ترتیبات", "Settings", "Settings")} className="flex h-12 w-12 items-center justify-center rounded-2xl text-soft hover:bg-sunken">
               <SettingsIcon className="h-6 w-6" aria-hidden />
             </Link>
-            <LogoutButton />
+            <LogoutButton labeled />
           </span>
         ) : undefined
       }
