@@ -7,7 +7,7 @@ A hyper-local marketplace connecting households in Islamabad and Rawalpindi with
 | Area | Status |
 |---|---|
 | Monorepo and shared API contract | Done |
-| Mockup screens and design PDF | In progress |
+| Worker, customer and admin screens | In progress |
 | API, database, seed data | In progress |
 | Jev matching engine | In progress |
 | Live end-to-end flows | In progress |
@@ -28,7 +28,7 @@ A hyper-local marketplace connecting households in Islamabad and Rawalpindi with
 - **Trust.** Voice or tap reviews are summarised into short trust tags, and workers rate hirers too.
 - **Crews.** Several workers take one job at one price, and all become engaged together.
 - **Admin.** Approve or suspend workers, manage jobs and disputes, and add, edit, disable or reorder categories with no code change or redeploy.
-- **Field agents.** Authorised agents can create profiles for workers who cannot use a phone.
+- **Field agents.** Authorised agents can create profiles for workers who cannot use a phone. Self-signup is free. An agent-assisted signup carries a fee set by the admin, split between the agent and the platform, with a per-agent ledger in the admin panel.
 - **Installable PWA.** Offline access to a worker's profile, upcoming jobs and earnings, plus queued actions, Web Push, and a sunlight mode.
 
 ## Setup
@@ -74,7 +74,6 @@ Other useful commands:
 | `pnpm test` | Run the unit tests, including the Jev matching engine |
 | `pnpm typecheck` | Type-check every package |
 | `pnpm build` | Build everything |
-| `pnpm screenshots` | Capture every mockup route to `design/screens/` and build `design/KaamWala-Screens.pdf`. Run `pnpm --filter @kaamwala/web exec playwright install chromium` once first |
 | `pnpm db:down` | Stop the local database |
 
 Production deployment is documented in [infra/DEPLOY.md](infra/DEPLOY.md).
@@ -113,6 +112,7 @@ Jev is not an AI service. It is local code, and every transcript and search also
 ## AI coding assistants used
 
 - **Claude Code** (Anthropic), used to build this project.
+- **Claude** on claude.ai (Anthropic), used to produce the design mockups submitted separately.
 - **Codex** (OpenAI). `TODO: confirm` whether Codex was used on this project, and remove this line if not.
 
 ## Seeded / Mocked
@@ -125,7 +125,7 @@ These parts are not real, and the product does not present them as real.
 | **Payments** | Not implemented. The app records the agreed price, and customer and worker settle it between themselves. Earnings are a log of agreed job prices, not money moved through the app. |
 | **CNIC verification** | Not verified against any government record, including NADRA. The number is read from the photo, only its salted SHA-256 hash is stored, and the hash is used to block duplicate accounts. |
 | **Demo data** | Seeded: at least 40 workers across 9 categories in Islamabad and Rawalpindi sectors, 3 crews, 15 past jobs, 10 customers, 1 admin and 1 agent. All names, phone numbers, coordinates, ratings and reviews are fictional. |
-| **Design screenshots** | The images in `design/` are captured from mockup routes that use fake data. |
+| **Field-agent signup fee** | Collection is mocked. The fee (default Rs 200) and the agent's and platform's shares are recorded in a ledger, but no money is collected or paid out. |
 
 ## Known limitations
 
@@ -183,7 +183,6 @@ Thanks to the authors of these projects. All project-specific code in this repos
 | [PostCSS](https://postcss.org) and [Autoprefixer](https://github.com/postcss/autoprefixer) | MIT |
 | [Vitest](https://vitest.dev) | MIT |
 | [Playwright](https://playwright.dev) | Apache-2.0 |
-| [pdf-lib](https://pdf-lib.js.org) | MIT |
 | [tsup](https://tsup.egoist.dev) | MIT |
 | [tsx](https://tsx.is) | MIT |
 | Type definitions from [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped) (@types/*) | MIT |
