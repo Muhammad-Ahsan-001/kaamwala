@@ -1,3 +1,4 @@
+import { canonicalText } from "@kaamwala/jev";
 import { addDaysIso, endOfDatePkt, fromDateOnly, startOfDatePkt } from "../geo";
 
 /** How long after the agreed time a one-day job may finish and still count as on time. */
@@ -50,4 +51,43 @@ export function averageResponseMinutes(pairs: { postedAt: Date; repliedAt: Date 
   if (!pairs.length) return null;
   const totalMs = pairs.reduce((sum, p) => sum + Math.max(0, p.repliedAt.getTime() - p.postedAt.getTime()), 0);
   return Math.round((totalMs / pairs.length / 60_000) * 10) / 10;
+}
+
+/** What a worker's answers about a customer are saved as. Gemini is prompted with the same words. */
+export const HIRER_TAG = {
+  paidOnTime: "waqt par adaigi",
+  paidLate: "adaigi mein der",
+  paidExtra: "extra diya",
+  goodBehaviour: "acha rawaiya",
+  badBehaviour: "bura rawaiya",
+} as const;
+
+export interface HirerAnswers {
+  paidOnTime?: boolean | undefined;
+  paidExtra?: boolean | undefined;
+  behaviour?: "good" | "okay" | "bad" | undefined;
+}
+
+export const BEHAVIOUR_RATING = { good: 5, okay: 3, bad: 1 } as const;
+
+export function hirerTagsFrom(answers: HirerAnswers): string[] {
+  const tags: string[] = [];
+  if (answers.paidOnTime === true) tags.push(HIRER_TAG.paidOnTime);
+  if (answers.paidOnTime === false) tags.push(HIRER_TAG.paidLate);
+  if (answers.paidExtra === true) tags.push(HIRER_TAG.paidExtra);
+  if (answers.behaviour === "good") tags.push(HIRER_TAG.goodBehaviour);
+  if (answers.behaviour === "bad") tags.push(HIRER_TAG.badBehaviour);
+  return tags;
+}
+
+/** Null when no worker has said either way, so a customer with no history never shows as 0%. */
+export function hirerPaymentStats(tagLists: string[][]): { paidOnTimePct: number | null; paidExtraCount: number } {
+  const said = (tags: string[], tag: string) => tags.some((t) => canonicalText(t) === canonicalText(tag));
+  const count = (tag: string) => tagLists.filter((tags) => said(tags, tag)).length;
+  const onTime = count(HIRER_TAG.paidOnTime);
+  const answered = onTime + count(HIRER_TAG.paidLate);
+  return {
+    paidOnTimePct: answered ? Math.round((onTime / answered) * 100) : null,
+    paidExtraCount: count(HIRER_TAG.paidExtra),
+  };
 }

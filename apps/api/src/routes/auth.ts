@@ -5,7 +5,7 @@ import { Role } from "@kaamwala/contracts";
 import { authOf, normalizePhone, requireAuth, signToken } from "../auth";
 import { prisma } from "../db";
 import { env } from "../env";
-import { forbidden, unauthorized } from "../errors";
+import { AppError, suspended, unauthorized } from "../errors";
 import { hirerCard, toAuthUser, workerCard } from "../serialize";
 
 const OTP_TTL_MS = 5 * 60 * 1000;
@@ -56,7 +56,11 @@ export async function authRoutes(app: FastifyInstance) {
     // Staff roles are only ever granted by an admin or the seed.
     const wanted = body.role === "worker" || body.role === "customer" ? body.role : undefined;
     const existing = await prisma.user.findUnique({ where: { phone } });
-    if (existing?.suspended) throw forbidden("This account is suspended.");
+    if (existing?.suspended) throw suspended();
+    // The admin and agent doors never create or convert an account, so a stranger cannot end up with one there.
+    if ((body.role === "admin" || body.role === "agent") && existing?.role !== body.role) {
+      throw new AppError(403, "NOT_STAFF", "This number is not approved for this sign-in.");
+    }
 
     let user = existing;
     if (!user) {
@@ -77,7 +81,7 @@ export async function authRoutes(app: FastifyInstance) {
     const [authUser, workerDto, hirer] = await Promise.all([
       authUserFor(user.id),
       worker ? workerCard(worker.id) : null,
-      prisma.hirerProfile.count({ where: { userId: user.id } }).then((n) => (n ? hirerCard(user.id) : null)),
+      prisma.hirerProfile.count({ where: { userId: user.id } }).then((n) => (n ? hirerCard(user.id, { own: true }) : null)),
     ]);
     return { user: authUser, worker: workerDto, hirer };
   });

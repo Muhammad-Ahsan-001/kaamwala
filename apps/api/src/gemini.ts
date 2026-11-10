@@ -5,11 +5,13 @@ import { z } from "zod";
 import { firstSuccess } from "./budget";
 import { env } from "./env";
 import { getActiveCategories } from "./jev";
+import { generateWithOpenAi, openaiConfigured } from "./openai";
 import { cleanMime, type FilePart } from "./uploads";
 
 const client = env.GEMINI_API_KEY ? new GoogleGenAI({ apiKey: env.GEMINI_API_KEY }) : null;
 
-export const geminiConfigured = Boolean(client);
+/** True when any AI provider is available. OpenAI is tried first, and Gemini is the backup. */
+export const geminiConfigured = Boolean(client) || openaiConfigured;
 
 /** Gemini was not configured, failed, timed out or returned something unusable. */
 export class GeminiUnavailable extends Error {}
@@ -38,7 +40,14 @@ async function generateWith<T>(
 
 /** Tries each configured model in turn. Fails only when none of them gives a usable answer in time. */
 async function generate<T>(parts: Part[], schema: Schema, validator: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<T> {
-  if (!client) throw new GeminiUnavailable("Gemini API key is not configured.");
+  if (openaiConfigured) {
+    try {
+      return await generateWithOpenAi(parts, schema, validator);
+    } catch (err) {
+      console.warn(`OpenAI could not answer: ${(err instanceof Error ? err.message : "unknown").slice(0, 200)}`);
+    }
+  }
+  if (!client) throw new GeminiUnavailable("No AI provider could answer.");
   try {
     return await firstSuccess(
       models,
@@ -137,6 +146,45 @@ ${categoryList()}`,
       rate: z.number().int().nullable().default(null),
       area: z.string().nullable().default(null),
       workingHours: z.string().nullable().default(null),
+    }),
+  );
+}
+
+export interface CustomerExtract {
+  transcript: string;
+  name: string | null;
+  area: string | null;
+  address: string | null;
+}
+
+export function extractCustomer(input: { audio?: FilePart | null; text?: string | null }) {
+  const parts: Part[] = [];
+  if (input.audio) parts.push(inline(input.audio));
+  const typed = input.text ? `Their words: """${input.text}"""` : "";
+  const source = input.audio ? `${TRANSCRIPT_RULE}\n${typed}` : `${typed}\nUse their words as the transcript.`;
+  parts.push({
+    text: `A household customer in Islamabad or Rawalpindi, Pakistan is signing up.
+${source}
+Extract their name, their area or sector, and their street address.
+Use null for anything they did not say. Never guess.`,
+  });
+  return generate<CustomerExtract>(
+    parts,
+    {
+      type: Type.OBJECT,
+      properties: {
+        transcript: str("What was said"),
+        name: str("Person's name", true),
+        area: str("Area or sector, e.g. G-9 or Saddar", true),
+        address: str("Street and house number", true),
+      },
+      required: ["transcript"],
+    },
+    z.object({
+      transcript: z.string(),
+      name: z.string().nullable().default(null),
+      area: z.string().nullable().default(null),
+      address: z.string().nullable().default(null),
     }),
   );
 }
@@ -270,7 +318,7 @@ export function readCnic(image: FilePart) {
     [
       inline(image),
       {
-        text: "This should be a Pakistani CNIC. Return its 13-digit identity number in the form 12345-1234567-1. Return null if this is not a CNIC or the number is not fully legible. Never guess a digit.",
+        text: "This should be a Pakistani CNIC, as a photo or a scanned PDF. Return its 13-digit identity number in the form 12345-1234567-1. Return null if this is not a CNIC or the number is not fully legible. Never guess a digit.",
       },
     ],
     {

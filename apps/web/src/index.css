@@ -62,6 +62,8 @@
 
   html {
     font-size: 16px;
+    /* The text size dial. It scales type only, so rem-based tap targets keep their size. */
+    --type: 0.9;
     line-height: 1.5;
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
@@ -70,6 +72,8 @@
 
   html[lang="ur"] {
     font-size: 16.5px;
+    /* Nastaliq reads smaller than Latin at the same size, so it gives up a little less. */
+    --type: 0.93;
     /* Nastaliq descends far below the baseline; this keeps lines from colliding. */
     line-height: 2.15;
     font-family: var(--urdu), var(--latin);
@@ -77,11 +81,15 @@
 
   html[data-sunlight="on"] {
     font-size: 18.5px;
+    /* Outdoors the text stays at its full, larger size. */
+    --type: 1;
     font-weight: 600;
   }
 
   body {
     @apply bg-page text-ink antialiased;
+    /* Text with no size class of its own follows the dial as well. */
+    font-size: calc(1rem * var(--type, 1));
     margin: 0;
     min-width: 320px;
     overflow-x: hidden;
@@ -148,6 +156,12 @@
   .ur {
     font-family: var(--urdu), var(--latin);
     line-height: 2.15;
+  }
+
+  /* A clipped box cuts Nastaliq's tails off. Padding widens the clip edge, and the margin takes the height back out. */
+  :where(html[lang="ur"]) .truncate {
+    padding-block: 0.25em;
+    margin-block: -0.25em;
   }
 
   .admin-root {

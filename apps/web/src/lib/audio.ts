@@ -3,6 +3,9 @@
  * and spoken Urdu when the phone has a suitable voice.
  */
 
+import { data } from "../data";
+import { clipForText, isVoiceBusy, playGenerated, toggleVoice } from "./question-voices";
+
 let ctx: AudioContext | null = null;
 
 function audioContext(): AudioContext | null {
@@ -56,16 +59,52 @@ export function cue(kind: Cue, audioEnabled = true) {
   if (audioEnabled) playTone(kind);
 }
 
-/** Speak Urdu text if the phone has a suitable voice. Returns false when it cannot. */
-export function speakUrdu(text: string, enabled = true): boolean {
-  if (!enabled || typeof window === "undefined" || !("speechSynthesis" in window)) return false;
+function speakWithPhone(text: string): boolean {
+  if (!("speechSynthesis" in window)) return false;
   const synth = window.speechSynthesis;
   const voice = synth.getVoices().find((v) => v.lang.toLowerCase().startsWith("ur"));
+  // A phone with no Urdu voice would read this in English, which is worse than silence.
+  if (!voice) return false;
   synth.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "ur-PK";
   utterance.rate = 0.95;
-  if (voice) utterance.voice = voice;
+  utterance.voice = voice;
   synth.speak(utterance);
   return true;
+}
+
+/** Lines already generated, so hearing one again is instant and costs nothing. */
+const generated = new Map<string, string>();
+
+/** Speaks Urdu: a recording if there is one, then generated speech, then a real Urdu voice on the phone. False means nothing could be heard. */
+export async function speakNow(text: string, enabled = true): Promise<boolean> {
+  if (!enabled || typeof window === "undefined" || !text) return false;
+  const clip = clipForText(text);
+  if (clip) {
+    toggleVoice(clip, document.documentElement.lang === "en");
+    return true;
+  }
+  try {
+    await playGenerated(async () => {
+      const known = generated.get(text);
+      if (known) return known;
+      const url = URL.createObjectURL(await data.speak(text));
+      generated.set(text, url);
+      return url;
+    });
+    return true;
+  } catch {
+    return speakWithPhone(text);
+  }
+}
+
+export function speakUrdu(text: string, enabled = true): boolean {
+  if (!enabled || typeof window === "undefined" || !text) return false;
+  void speakNow(text, true);
+  return true;
+}
+
+export function isSpeaking(): boolean {
+  return isVoiceBusy() || ("speechSynthesis" in window && (window.speechSynthesis.speaking || window.speechSynthesis.pending));
 }

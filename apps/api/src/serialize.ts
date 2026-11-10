@@ -8,18 +8,22 @@ import type {
   JobCardData,
   Message as MessageDto,
   Offer as OfferDto,
+  PastWork,
   Review as ReviewDto,
+  ReviewView,
   TrustSummary,
   WorkerCard,
 } from "@kaamwala/contracts";
 import { canonicalText } from "@kaamwala/jev";
 import type { Category, Earning, Message, Prisma, Review, User, WorkerProfile } from "@prisma/client";
 import { prisma } from "./db";
-import { averageResponseMinutes, onTimeRate, wasOnTime } from "./domain/trust";
+import { averageResponseMinutes, hirerPaymentStats, onTimeRate, wasOnTime } from "./domain/trust";
 import { distanceKm, fromDateOnly } from "./geo";
 import { signedAudioUrl } from "./uploads";
 
-const oneDecimal = (n: number) => Math.round(n * 10) / 10;
+export const oneDecimal = (n: number) => Math.round(n * 10) / 10;
+
+const firstNameOf = (name: string | null) => (name ?? "").trim().split(/\s+/)[0] ?? "";
 
 export const toCategory = (c: Category): CategoryDto => ({
   id: c.id,
@@ -126,7 +130,7 @@ export async function trustFor(workers: WorkerProfile[]): Promise<Map<string, Tr
 export function toWorkerCard(
   w: WorkerWithUser,
   trust: TrustSummary,
-  cnicChecked: boolean,
+  cnicDuplicateChecked: boolean,
   origin?: { lat: number; lng: number },
 ): WorkerCard {
   return {
@@ -144,7 +148,7 @@ export function toWorkerCard(
     offlineUntil: w.offlineUntil?.toISOString() ?? null,
     approved: w.approved,
     trust,
-    cnicChecked,
+    cnicDuplicateChecked,
     phoneChecked: w.user.phoneVerifiedAt !== null,
     workingHours: w.workingHours,
     photos: w.photos,
@@ -168,7 +172,14 @@ export async function workerCard(id: string): Promise<WorkerCard | null> {
   return card ?? null;
 }
 
-export async function hirerCard(userId: string): Promise<HirerCard | null> {
+/** Every past-work photo. Only a label Gemini actually gave is shown, never a guess. */
+export function toPastWork(w: { photos: string[]; photoSkills: Prisma.JsonValue }): PastWork[] {
+  const labels = (w.photoSkills ?? {}) as Record<string, string>;
+  return w.photos.map((url) => ({ id: url.split("/").pop() ?? url, url, skill: labels[url] ?? null }));
+}
+
+/** Exact location and address go only to the customer themselves. */
+export async function hirerCard(userId: string, options: { own?: boolean } = {}): Promise<HirerCard | null> {
   const user = await prisma.user.findUnique({ where: { id: userId }, include: { hirerProfile: true } });
   if (!user) return null;
   const [jobCount, jobTypes, reviews] = await Promise.all([
@@ -179,21 +190,27 @@ export async function hirerCard(userId: string): Promise<HirerCard | null> {
       select: { rating: true, tags: true },
     }),
   ]);
+  const profile = user.hirerProfile;
+  const own = options.own === true;
+  const tagLists = reviews.map((r) => r.tags);
   return {
     id: user.id,
     name: user.name ?? "",
-    photoUrl: user.hirerProfile?.photoUrl ?? null,
-    area: user.hirerProfile?.area ?? null,
+    photoUrl: profile?.photoUrl ?? null,
+    area: profile?.area ?? null,
     jobCount,
     rating: reviews.length ? oneDecimal(reviews.reduce((s, r) => s + r.rating, 0) / reviews.length) : 0,
     ratingCount: reviews.length,
-    tags: tallyTags(reviews.map((r) => r.tags)),
+    tags: tallyTags(tagLists),
     jobTypes: jobTypes.map((t) => ({ categoryId: t.categoryId, count: t._count._all })),
+    ...hirerPaymentStats(tagLists),
+    location: own && profile?.lat != null && profile.lng != null ? { lat: profile.lat, lng: profile.lng } : null,
+    address: own ? (profile?.address ?? null) : null,
   };
 }
 
 export const jobInclude = {
-  customer: { select: { name: true } },
+  customer: { select: { name: true, hirerProfile: { select: { address: true } } } },
   assignments: { select: { workerId: true, active: true } },
   crew: { select: { leaderId: true } },
   days: { orderBy: { dayNumber: "asc" } },
@@ -235,10 +252,12 @@ export const toJob = (j: JobFull): JobDto => ({
     status: d.status,
     completedAt: d.completedAt?.toISOString() ?? null,
   })),
+  // The worker needs the address only once the booking is real.
+  address: j.engagedAt ? (j.customer.hirerProfile?.address ?? null) : null,
 });
 
 const AREA_PRECISION = 100;
-const toArea = (n: number) => Math.round(n * AREA_PRECISION) / AREA_PRECISION;
+export const toArea = (n: number) => Math.round(n * AREA_PRECISION) / AREA_PRECISION;
 
 /**
  * What a worker who is not on the job sees of an open job: enough to decide whether to bid.
@@ -246,8 +265,9 @@ const toArea = (n: number) => Math.round(n * AREA_PRECISION) / AREA_PRECISION;
  */
 export const toOpenJobView = (j: JobFull): JobDto => ({
   ...toJob(j),
-  customerName: (j.customer.name ?? "").trim().split(/\s+/)[0] ?? "",
+  customerName: firstNameOf(j.customer.name),
   location: { lat: toArea(j.lat), lng: toArea(j.lng) },
+  address: null,
 });
 
 export const toMessage = (m: Message): MessageDto => ({
@@ -271,6 +291,26 @@ export const toReview = (r: Review): ReviewDto => ({
   createdAt: r.createdAt.toISOString(),
 });
 
+export const reviewInclude = {
+  reviewer: {
+    select: {
+      name: true,
+      hirerProfile: { select: { area: true } },
+      workerProfile: { select: { area: true } },
+    },
+  },
+  job: { select: { categoryId: true } },
+} satisfies Prisma.ReviewInclude;
+type ReviewFull = Prisma.ReviewGetPayload<{ include: typeof reviewInclude }>;
+
+/** Profiles are public, so a reviewer appears by first name and area only. */
+export const toReviewView = (r: ReviewFull): ReviewView => ({
+  ...toReview(r),
+  authorName: firstNameOf(r.reviewer.name),
+  authorArea: r.reviewer.hirerProfile?.area ?? r.reviewer.workerProfile?.area ?? null,
+  categoryId: r.job.categoryId,
+});
+
 export const toEarning = (e: Earning): EarningDto => ({
   id: e.id,
   jobId: e.jobId,
@@ -283,8 +323,9 @@ export const toEarning = (e: Earning): EarningDto => ({
 export const offerInclude = { worker: { include: { user: true } } } satisfies Prisma.OfferInclude;
 type OfferFull = Prisma.OfferGetPayload<{ include: typeof offerInclude }>;
 
-export async function toOffers(offers: OfferFull[]): Promise<OfferDto[]> {
-  const cards = new Map((await workerCards(offers.map((o) => o.worker))).map((c) => [c.id, c]));
+/** origin fills in each bidder's distance from the job. */
+export async function toOffers(offers: OfferFull[], origin?: { lat: number; lng: number }): Promise<OfferDto[]> {
+  const cards = new Map((await workerCards(offers.map((o) => o.worker), origin)).map((c) => [c.id, c]));
   return offers.map((o) => ({
     id: o.id,
     jobId: o.jobId,

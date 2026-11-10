@@ -1,26 +1,50 @@
-import { Languages, MonitorSmartphone, Sun, Volume2, type LucideIcon } from "lucide-react";
+import { CircleCheck, Languages, LogOut, MonitorSmartphone, Sun, Volume2, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { useLogout, useSession } from "../lib/session";
 import { useSettings } from "../lib/settings";
-import { Card, Switch } from "../ui/primitives";
+import { PwaSettings } from "../pwa/PwaSettings";
+import { Button, Card, Switch } from "../ui/primitives";
 import { LangPills, Screen } from "../ui/shell";
 
-function Row({ icon: Icon, title, body, control }: { icon: LucideIcon; title: string; body?: string; control: ReactNode }) {
+function Row({ icon: Icon, title, body, control, children }: { icon: LucideIcon; title: string; body?: string; control: ReactNode; children?: ReactNode }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-2">
-      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand-100 text-brand-700">
-        <Icon className="h-6 w-6" aria-hidden />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-lg font-bold">{title}</div>
-        {body && <div className="text-sm text-soft">{body}</div>}
+    <div className="px-3 py-2">
+      <div className="flex items-center gap-3">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand-100 text-brand-700">
+          <Icon className="h-6 w-6" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-lg font-bold">{title}</div>
+          {body && <div className="text-sm text-soft">{body}</div>}
+        </div>
+        {control}
       </div>
-      {control}
+      {children}
     </div>
   );
 }
 
+function KeepAwakeRow() {
+  const { t, keepAwake, setKeepAwake, wakeLockSupported, onActiveJob, screenHeld } = useSettings();
+  const body = !wakeLockSupported ? t("یہ براؤزر اس سہولت کو سپورٹ نہیں کرتا", "Ye browser is sahulat ko support nahi karta", "This browser does not support this feature") : t("جاری کام کے دوران اسکرین بند نہیں ہو گی", "Jari kaam ke dauran screen band nahi hogi", "Your screen stays on during a job in progress");
+  const state = !wakeLockSupported || !keepAwake ? null : !onActiveJob ? t("کام شروع ہوتے ہی چلے گا", "Kaam shuru hote hi chalega", "Starts when a job begins") : screenHeld ? t("ابھی اسکرین جلتی رکھی ہوئی ہے", "Abhi screen jalti rakhi hui hai", "Keeping the screen on now") : t("فون نے ابھی اجازت نہیں دی", "Phone ne abhi ijazat nahi di", "The phone has not allowed this right now");
+
+  return (
+    <Row icon={MonitorSmartphone} title={t("اسکرین جلتی رکھیں", "Screen jalti rakhein", "Keep screen awake")} body={body} control={<Switch checked={keepAwake && wakeLockSupported} disabled={!wakeLockSupported} onChange={setKeepAwake} label={t("اسکرین جلتی رکھیں", "Screen jalti rakhein", "Keep screen awake")} />}>
+      {state && (
+        <p className={screenHeld ? "ms-[60px] flex items-center gap-1 text-sm font-bold text-brand-700" : "ms-[60px] text-sm font-semibold text-soft"}>
+          {screenHeld && <CircleCheck className="h-4 w-4 shrink-0" aria-hidden />}
+          {state}
+        </p>
+      )}
+    </Row>
+  );
+}
+
 export function SettingsScreen() {
-  const { t, sunlight, setSunlight, audioCues, setAudioCues, keepAwake, setKeepAwake, wakeLockSupported } = useSettings();
+  const { t, sunlight, setSunlight, audioCues, setAudioCues } = useSettings();
+  const { user } = useSession();
+  const logout = useLogout();
 
   return (
     <Screen title={t("ترتیبات", "Settings", "Settings")} back>
@@ -42,16 +66,7 @@ export function SettingsScreen() {
           control={<Switch checked={sunlight} onChange={setSunlight} label={t("دھوپ کا موڈ", "Dhoop mode", "Sunlight mode")} />}
         />
 
-        <Row
-          icon={MonitorSmartphone}
-          title={t("اسکرین جلتی رکھیں", "Screen jalti rakhein", "Keep screen awake")}
-          body={
-            wakeLockSupported
-              ? t("جب تک ایپ کھلی ہو، اسکرین بند نہیں ہو گی", "Jab tak app khuli ho, screen band nahi hogi", "Your screen stays on while the app is open")
-              : t("یہ براؤزر اس سہولت کو سپورٹ نہیں کرتا", "Ye browser is sahulat ko support nahi karta", "This browser does not support this feature")
-          }
-          control={<Switch checked={keepAwake && wakeLockSupported} disabled={!wakeLockSupported} onChange={setKeepAwake} label={t("اسکرین جلتی رکھیں", "Screen jalti rakhein", "Keep screen awake")} />}
-        />
+        {user?.role === "worker" && <KeepAwakeRow />}
 
         <Row
           icon={Volume2}
@@ -61,9 +76,22 @@ export function SettingsScreen() {
         />
       </Card>
 
+      <PwaSettings />
+
       <p className="mt-3 text-center text-sm text-soft">
         {t("براؤزر فون کی روشنی خود نہیں بدل سکتا۔ روشنی فون کی سیٹنگ سے بڑھائیں۔", "Browser phone ki roshni khud nahi badal sakta. Roshni phone ki setting se barhayein.", "Browsers cannot change your phone's brightness. Use your phone's own brightness control.")}
       </p>
+
+      {user && (
+        <div className="mt-4">
+          <Button variant="secondary" size="lg" icon={LogOut} className="w-full" onClick={logout}>
+            {t("لاگ آؤٹ", "Log out", "Log out")}
+          </Button>
+          <p dir="ltr" className="latin mt-1 text-center text-sm text-soft">
+            {user.phone}
+          </p>
+        </div>
+      )}
     </Screen>
   );
 }

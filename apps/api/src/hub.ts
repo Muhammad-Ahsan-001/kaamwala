@@ -15,6 +15,8 @@ interface Client extends SocketIdentity {
 
 const OPEN = 1;
 const HEARTBEAT_MS = 30_000;
+/** Browsers answer pings but never show them to the page, so the page needs a frame it can see. */
+const HEARTBEAT_FRAME = JSON.stringify({ type: "heartbeat" });
 export const CLOSE_TOKEN_EXPIRED = 4401;
 export const CLOSE_SUSPENDED = 4403;
 
@@ -49,6 +51,7 @@ class Hub {
         }
         client.alive = false;
         client.socket.ping();
+        this.send(client, HEARTBEAT_FRAME);
       }
     }, HEARTBEAT_MS);
     this.timer.unref();

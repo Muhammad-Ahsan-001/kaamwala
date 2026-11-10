@@ -1,7 +1,9 @@
 import { Briefcase, ChevronRight, House, Map as MapIcon, MessageCircleQuestion, User, Volume2, Wallet, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { NavLink, useNavigate, useNavigationType } from "react-router-dom";
+import { NavLink, useLocation, useNavigationType } from "react-router-dom";
 import { speakUrdu } from "../lib/audio";
+import { parentOf, useGoBack } from "../lib/back";
+import { useSession } from "../lib/session";
 import { useSettings, type Lang } from "../lib/settings";
 import { cx } from "./primitives";
 
@@ -122,6 +124,23 @@ function StepDots({ total, current }: { total: number; current: number }) {
   );
 }
 
+function BackButton({ back }: { back: true | string | (() => void) }) {
+  const { t } = useSettings();
+  const { pathname } = useLocation();
+  const { user, home } = useSession();
+  const goBack = useGoBack(typeof back === "function" ? true : back, parentOf(pathname, user, home));
+  return (
+    <button
+      type="button"
+      aria-label={t("واپس", "Wapas", "Back")}
+      onClick={typeof back === "function" ? back : goBack}
+      className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-ink hover:bg-sunken"
+    >
+      <ChevronRight className="h-7 w-7 ltr:rotate-180" aria-hidden />
+    </button>
+  );
+}
+
 export function Screen({
   title,
   back,
@@ -134,8 +153,8 @@ export function Screen({
   steps,
 }: {
   title?: string;
-  /** true goes back in history; a string goes to that path. */
-  back?: boolean | string;
+  /** true goes back in history, with a sensible parent when there is none. A string is this screen's parent. A function decides for itself. */
+  back?: boolean | string | (() => void);
   right?: ReactNode;
   nav?: "worker" | "customer";
   footer?: ReactNode;
@@ -146,23 +165,15 @@ export function Screen({
   speak?: string;
   steps?: { total: number; current: number };
 }) {
-  const navigate = useNavigate();
   const navigationType = useNavigationType();
   const { t } = useSettings();
   const hasHeader = title !== undefined || steps;
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-page">
+    <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col overflow-x-clip bg-page">
       {hasHeader && (
         <header className="sticky top-0 z-[500] flex min-h-16 items-center gap-1 bg-page/95 px-2 backdrop-blur">
           {back ? (
-            <button
-              type="button"
-              aria-label={t("واپس", "Wapas", "Back")}
-              onClick={() => (typeof back === "string" ? navigate(back) : navigate(-1))}
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-ink hover:bg-sunken"
-            >
-              <ChevronRight className="h-7 w-7 ltr:rotate-180" aria-hidden />
-            </button>
+            <BackButton back={back} />
           ) : (
             <span className="w-2" />
           )}

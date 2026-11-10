@@ -27,4 +27,12 @@ export async function pushRoutes(app: FastifyInstance) {
     });
     return reply.code(201).send({ ok: true });
   });
+
+  /** Only the owner can remove a subscription, so a guessed endpoint does nothing. */
+  app.post("/push/unsubscribe", { preHandler: requireAuth }, async (req) => {
+    const { user } = authOf(req);
+    const { endpoint } = z.object({ endpoint: z.string().url() }).parse(req.body);
+    await prisma.pushSubscription.deleteMany({ where: { endpoint, userId: user.id } });
+    return { ok: true };
+  });
 }

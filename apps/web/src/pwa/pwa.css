@@ -1,0 +1,141 @@
+/* The offline banner is fixed, so everything else moves down by its height while it shows. */
+html.kw-banner body {
+  padding-top: var(--kw-banner-h, 0px);
+}
+html.kw-banner header.sticky {
+  top: var(--kw-banner-h, 0px);
+}
+
+/* Driver.js ships its own look and fonts. This makes it part of the app, in Urdu and at phone size. */
+.kw-tour.driver-popover {
+  box-sizing: border-box;
+  width: min(328px, calc(100vw - 24px));
+  min-width: 0;
+  max-width: none;
+  padding: 1rem;
+  border-radius: 1.5rem;
+  background: rgb(var(--surface));
+  color: rgb(var(--ink));
+  font-family: var(--latin);
+  box-shadow: 0 10px 28px rgb(60 50 30 / 0.22);
+}
+
+.kw-tour.kw-tour-ur.driver-popover {
+  font-family: var(--urdu), var(--latin);
+}
+
+.kw-tour .driver-popover-title {
+  padding-inline-end: 3rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.kw-tour.kw-tour-ur .driver-popover-title {
+  line-height: 2;
+}
+
+.kw-tour .driver-popover-description {
+  font-size: 1rem;
+  line-height: 1.55;
+  color: rgb(var(--ink));
+}
+
+.kw-tour.kw-tour-ur .driver-popover-description {
+  line-height: 2.05;
+}
+
+.kw-tour .kw-tour-note {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+  color: rgb(var(--soft));
+}
+
+.kw-tour .driver-popover-close-btn {
+  top: 0.25rem;
+  right: 0.25rem;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 1rem;
+  font-size: 1.5rem;
+  line-height: 3rem;
+  color: rgb(var(--soft));
+}
+
+.kw-tour[dir="rtl"] .driver-popover-close-btn {
+  right: auto;
+  left: 0.25rem;
+}
+
+.kw-tour .driver-popover-footer {
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* Digits read left to right even in Urdu, so "1 / 5" must not be mirrored into "5 / 1". */
+.kw-tour .driver-popover-progress-text {
+  flex: none;
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-family: var(--latin);
+  font-size: 0.875rem;
+  color: rgb(var(--soft));
+}
+
+.kw-tour .driver-popover-navigation-btns {
+  flex: 1 1 auto;
+  gap: 0.5rem;
+}
+
+.kw-tour .driver-popover-navigation-btns button + button {
+  margin: 0;
+}
+
+.kw-tour .driver-popover-footer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3rem;
+  min-height: 3rem;
+  padding: 0 1rem;
+  border: 0;
+  border-radius: 1rem;
+  background: rgb(var(--sunken));
+  color: rgb(var(--ink));
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-shadow: none;
+}
+
+.kw-tour .driver-popover-next-btn,
+.kw-tour .driver-popover-done-btn {
+  background: rgb(var(--brand-600));
+  color: #fff;
+}
+
+.kw-tour .driver-popover-next-btn:hover,
+.kw-tour .driver-popover-done-btn:hover,
+.kw-tour .driver-popover-next-btn:focus,
+.kw-tour .driver-popover-done-btn:focus {
+  background: rgb(var(--brand-700));
+}
+
+.kw-tour .kw-tour-listen {
+  background: rgb(var(--brand-100));
+  color: rgb(var(--brand-700));
+}
+
+.kw-tour .driver-popover-footer-btn:focus-visible {
+  outline: 3px solid rgb(var(--brand-500));
+  outline-offset: 2px;
+}
+
+/* The popover takes focus on its close button when it opens. Inset, so the ring stays inside the card. */
+.kw-tour .driver-popover-close-btn:focus-visible {
+  outline: 2px solid rgb(var(--brand-200));
+  outline-offset: -4px;
+}

@@ -11,7 +11,7 @@ vi.mock("../db", () => ({ prisma: { workerProfile: { findMany: async () => [] } 
 import { CATEGORIES } from "../../prisma/categories";
 import type { OnboardingExtract, ProblemExtract } from "../gemini";
 import { jev } from "../jev";
-import { buildAnalysis, buildDraft } from "./ai";
+import { buildAnalysis, buildCustomerDraft, buildDraft } from "./ai";
 
 beforeAll(() => {
   jev.load(
@@ -97,6 +97,23 @@ describe("buildDraft", () => {
 
   it("keeps working hours as said", () => {
     expect(buildDraft("subah 9 se shaam 6", null, "workingHours").workingHours).toBe("subah 9 se shaam 6");
+  });
+});
+
+describe("buildCustomerDraft", () => {
+  it("prefers what Gemini read", () => {
+    const transcript = "mera naam Ayesha hai";
+    const draft = buildCustomerDraft(transcript, { transcript, name: "عائشہ", area: "G 9", address: "Gali 4" });
+    expect(draft).toMatchObject({ name: "عائشہ", area: "G-9", address: "Gali 4", source: "gemini" });
+  });
+
+  it("reads typed words through Jev and labels them so", () => {
+    const draft = buildCustomerDraft("mera naam Ayesha Malik hai, G-9 mein rehti hoon", null);
+    expect(draft).toMatchObject({ name: "Ayesha Malik", area: "G-9", source: "jev_only" });
+  });
+
+  it("never invents an address without Gemini", () => {
+    expect(buildCustomerDraft("gali 14 makan 22", null).address).toBeNull();
   });
 });
 

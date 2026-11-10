@@ -15,6 +15,16 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(16),
   CNIC_SALT: z.string().min(16),
+  OPENAI_API_KEY: z.string().trim().default(""),
+  OPENAI_MODEL: z.string().default("gpt-5.4-mini"),
+  /** Tried in order when the main model is overloaded, retired or too slow. */
+  OPENAI_FALLBACK_MODELS: z.string().default("gpt-4.1-mini"),
+  /** gpt-transcribe and gpt-4o-mini-transcribe write Urdu speech in Hindi script, so they are not used here. */
+  OPENAI_TRANSCRIBE_MODEL: z.string().default("gpt-4o-transcribe"),
+  OPENAI_TRANSCRIBE_FALLBACK_MODELS: z.string().default("whisper-1"),
+  OPENAI_TTS_MODEL: z.string().default("gpt-4o-mini-tts"),
+  /** Only sent when set, because not every model accepts it. */
+  OPENAI_REASONING_EFFORT: z.string().default(""),
   GEMINI_API_KEY: z.string().trim().default(""),
   GEMINI_MODEL: z.string().default("gemini-3.5-flash"),
   /** Tried in order when the main model is overloaded, retired or too slow. */

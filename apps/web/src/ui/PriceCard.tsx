@@ -1,9 +1,13 @@
 import { Minus, Plus } from "lucide-react";
+import type { ReactNode } from "react";
 import { rupees } from "../data/labels";
 import { cue } from "../lib/audio";
 import { useSettings } from "../lib/settings";
 import { PriceMath } from "./hire";
-import { Card } from "./primitives";
+import { Card, cx } from "./primitives";
+
+/** Long totals must still fit between the two buttons on a 360px phone. */
+const amountSize = (value: number) => (value >= 100_000 ? "text-xl" : value >= 10_000 ? "text-2xl" : "text-3xl");
 
 /** Price per day: moves only in the admin's fixed step and never goes below the floor. */
 export function PriceCard({
@@ -14,6 +18,7 @@ export function PriceCard({
   days,
   onStep,
   busy,
+  note,
 }: {
   label: string;
   value: number;
@@ -22,6 +27,8 @@ export function PriceCard({
   days: number;
   onStep: (direction: "up" | "down") => void;
   busy?: boolean;
+  /** One line under the price, such as who last changed it. */
+  note?: ReactNode;
 }) {
   const { t, audioCues } = useSettings();
   const canLower = value - step >= floor;
@@ -46,7 +53,7 @@ export function PriceCard({
           <span className="text-xs font-bold">{step}</span>
         </button>
         <div className="min-w-0 flex-1 text-center">
-          <output key={value} className="latin block animate-pop text-3xl font-extrabold tracking-tight" aria-live="polite">
+          <output key={value} className={cx("latin block animate-pop whitespace-nowrap font-extrabold tracking-tight", amountSize(value))} aria-live="polite">
             {rupees(value)}
           </output>
           <span className="text-sm text-soft">/ {t("دن", "din", "day")}</span>
@@ -64,8 +71,9 @@ export function PriceCard({
       </div>
       {days > 1 && <PriceMath perDay={value} days={days} className="mt-2 text-sm" />}
       <p className="mt-1 text-center text-sm font-semibold text-amber-700">
-        {t("کم از کم", "Kam az kam", "Minimum")} <span className="latin">{rupees(floor)}</span> · {t("ایڈمن کی حد", "admin floor", "admin floor")}
+        {canLower ? t("کم از کم", "Kam az kam", "Minimum") : t("یہی کم از کم ہے", "Yehi kam az kam hai", "This is the minimum")} <span className="latin">{rupees(floor)}</span>
       </p>
+      {note && <p className="text-center text-sm text-soft">{note}</p>}
     </Card>
   );
 }

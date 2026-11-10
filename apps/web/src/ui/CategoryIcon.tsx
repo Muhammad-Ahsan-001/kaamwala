@@ -48,8 +48,29 @@ export const CATEGORY_ICONS: Record<string, LucideIcon> = {
   shield: ShieldCheck,
 };
 
+/** The seed stores emoji. They are drawn from the same line-icon set as every admin-picked icon. */
+const EMOJI_ICONS: Record<string, string> = {
+  "⚡": "zap",
+  "🚰": "droplets",
+  "❄": "snowflake",
+  "🪚": "hammer",
+  "🔧": "wrench",
+  "🧱": "hard-hat",
+  "💪": "shovel",
+  "🎨": "paint-roller",
+  "🧹": "sparkles",
+};
+
+/** The CATEGORY_ICONS key for a stored icon value, or null when it is not one of them. */
+export function iconKey(name: string | undefined): string | null {
+  if (!name) return null;
+  if (CATEGORY_ICONS[name]) return name;
+  return EMOJI_ICONS[name.replace(/️/g, "")] ?? null;
+}
+
 export function iconFor(name: string | undefined): LucideIcon {
-  return (name && CATEGORY_ICONS[name]) || Wrench;
+  const key = iconKey(name);
+  return (key && CATEGORY_ICONS[key]) || Wrench;
 }
 
 export function CategoryIcon({ name, className }: { name: string | undefined; className?: string }) {

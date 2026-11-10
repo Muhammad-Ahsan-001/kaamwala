@@ -1,38 +1,45 @@
 import { ArrowLeft, Mic } from "lucide-react";
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { data } from "../../data";
 import { useData } from "../../lib/useData";
+import { useSession } from "../../lib/session";
 import { useSettings } from "../../lib/settings";
 import { digitsOnly } from "../../lib/validate";
 import { Async } from "../../ui/async";
-import { Button, Chip, Field, InlineError, LinkButton } from "../../ui/primitives";
+import { Button, Field, InlineError, LinkButton } from "../../ui/primitives";
 import { Screen } from "../../ui/shell";
+import { QuestionVoice } from "../../ui/QuestionVoice";
+import { AreaPicker, useAreas } from "./AreaPicker";
 import { draftProblems, useDraft, type DraftProblem } from "./draft";
-import { AgentBanner, SelfSignupFree, TextWithMic } from "./parts";
+import { AgentBanner, HourPresets, SelfSignupFree, TextWithMic } from "./parts";
 import { SkillsPicker, TradePicker } from "./TradePicker";
 
-const HOUR_PRESETS = [
-  { ur: "صبح 9 سے شام 6", roman: "Subah 9 se sham 6", en: "9 am to 6 pm" },
-  { ur: "سارا دن", roman: "Saara din", en: "All day" },
-  { ur: "صرف شام کو", roman: "Sirf sham ko", en: "Evenings only" },
-];
+const PROBLEMS: readonly string[] = ["trade", "area"];
 
 export function OnboardType() {
   const { t } = useSettings();
   const navigate = useNavigate();
+  const { user } = useSession();
   const [params] = useSearchParams();
-  const { worker, patchWorker } = useDraft();
-  const categories = useData(() => data.listCategories(), []);
-  const [errors, setErrors] = useState<DraftProblem[]>(params.get("problem") === "trade" ? ["trade"] : []);
+  const { worker, agentFor, patchWorker } = useDraft();
+  const categories = useData(() => data.listCategories(), [], { reloadOn: ["categories.changed"] });
+  const areas = useAreas();
+  const sentBack = params.get("problem");
+  const [tried, setTried] = useState(false);
+  const voiceOff = params.get("voice") === "off";
+  const problems = draftProblems(worker, areas.data);
+  // After the first attempt the marks follow what is on screen, so a fixed field stops being red.
+  const errors: DraftProblem[] = tried ? problems : sentBack && PROBLEMS.includes(sentBack) ? [sentBack as DraftProblem] : [];
 
   const has = (problem: DraftProblem) => errors.includes(problem);
 
   const submit = () => {
-    const problems = draftProblems(worker);
-    setErrors(problems);
-    if (problems.length === 0) navigate("/app/onboard");
+    setTried(true);
+    if (problems.length === 0) navigate("/app/onboard", { state: { typed: true } });
   };
+
+  if (user?.role === "agent" && !agentFor) return <Navigate to="/app/agent/new" replace />;
 
   return (
     <Screen
@@ -45,6 +52,11 @@ export function OnboardType() {
       }
     >
       <AgentBanner />
+      {voiceOff && (
+        <div className="mb-3">
+          <InlineError>{t("آواز کی سہولت ابھی کام نہیں کر رہی، اس لیے کچھ نہیں بھرا گیا۔ اپنی تفصیل یہاں لکھ دیں۔", "Awaz ki sahulat abhi kaam nahi kar rahi, is liye kuch nahi bhara gaya. Apni tafseel yahan likh dein.", "Voice is not working right now, so nothing was filled in. Please type your details here.")}</InlineError>
+        </div>
+      )}
       <div className="mb-2 flex justify-center">
         <SelfSignupFree />
       </div>
@@ -63,42 +75,33 @@ export function OnboardType() {
               submit();
             }}
           >
-            <Field label={t("آپ کا نام", "Aapka naam", "Your name")} htmlFor="f-name" error={has("name") ? t("اپنا پورا نام لکھیں", "Apna poora naam likhein", "Please enter your name") : undefined}>
-              <TextWithMic id="f-name" field="name" value={worker.name} invalid={has("name")} onChange={(name) => patchWorker({ name })} placeholder={t("مثلاً محمد اکرم", "Maslan Muhammad Akram", "e.g. Muhammad Akram")} />
+            <Field label={t("آپ کا نام", "Aapka naam", "Your name")} htmlFor="f-name" action={<QuestionVoice id="field-name" />}error={has("name") ? t("اپنا پورا نام لکھیں", "Apna poora naam likhein", "Please enter your name") : undefined}>
+              <TextWithMic id="f-name" field="name" value={worker.name} invalid={has("name")} onChange={(name) => patchWorker({ name })} placeholder={t("اپنا نام", "Apna naam", "Your full name")} />
             </Field>
 
-            <Field label={t("آپ کا کام", "Aapka kaam", "Your trade")} error={has("trade") ? t("اپنا کام چنیں یا لکھیں", "Apna kaam chunein ya likhein", "Choose or type your trade") : undefined}>
+            <Field label={t("آپ کا کام", "Aapka kaam", "Your trade")} action={<QuestionVoice id="field-trade" />}error={has("trade") ? t("اپنا کام چنیں یا لکھیں", "Apna kaam chunein ya likhein", "Choose or type your trade") : undefined}>
               <TradePicker categories={list} selected={worker.categoryIds} tradeText={worker.tradeText} onSelected={(categoryIds) => patchWorker({ categoryIds })} onTradeText={(tradeText) => patchWorker({ tradeText })} />
             </Field>
 
-            <Field label={t("آپ کے ہنر", "Aapke hunar", "Your skills")}>
+            <Field label={t("آپ کے ہنر (اختیاری)", "Aapke hunar (ikhtiyari)", "Your skills (optional)")} action={<QuestionVoice id="field-skills" />}>
               <SkillsPicker categories={list} categoryIds={worker.categoryIds} skills={worker.skills} onChange={(skills) => patchWorker({ skills })} />
             </Field>
 
             <div className="grid grid-cols-2 gap-3">
-              <Field label={t("تجربہ (سال)", "Tajurba (saal)", "Experience (years)")} htmlFor="f-years" error={has("years") ? t("صحیح سال لکھیں", "Sahi saal likhein", "Enter 0 to 70") : undefined}>
+              <Field label={t("تجربہ (سال)", "Tajurba (saal)", "Experience (years)")} htmlFor="f-years" action={<QuestionVoice id="field-years" />}error={has("years") ? t("0 سے 70 لکھیں", "0 se 70 likhein", "Enter 0 to 70") : undefined}>
                 <TextWithMic id="f-years" field="years" value={worker.years} inputMode="numeric" invalid={has("years")} onChange={(v) => patchWorker({ years: digitsOnly(v) })} placeholder="10" />
               </Field>
-              <Field label={t("ریٹ (روپے)", "Rate (rupay)", "Rate (Rs)")} htmlFor="f-rate" error={has("rate") ? t("صحیح ریٹ لکھیں", "Sahi rate likhein", "Enter a valid rate") : undefined}>
+              <Field label={t("ریٹ فی دن (روپے)", "Rate fi din (rupay)", "Rate per day (Rs)")} htmlFor="f-rate" action={<QuestionVoice id="field-rate" />}error={has("rate") ? t("صحیح ریٹ لکھیں", "Sahi rate likhein", "Enter a valid rate") : undefined}>
                 <TextWithMic id="f-rate" field="rate" value={worker.rate} inputMode="numeric" invalid={has("rate")} onChange={(v) => patchWorker({ rate: digitsOnly(v) })} placeholder="2000" />
               </Field>
             </div>
 
-            <Field label={t("آپ کا علاقہ", "Aapka ilaqa", "Your area")} htmlFor="f-area" error={has("area") ? t("اپنا علاقہ لکھیں", "Apna ilaqa likhein", "Please enter your area") : undefined}>
-              <TextWithMic id="f-area" field="area" value={worker.area} invalid={has("area")} onChange={(area) => patchWorker({ area })} placeholder={t("مثلاً G-9، صدر", "Maslan G-9, Saddar", "e.g. G-9, Saddar")} />
+            <Field label={t("آپ کا علاقہ", "Aapka ilaqa", "Your area")} htmlFor="f-area" action={<QuestionVoice id="field-area" />}error={has("area") ? (worker.area.trim() ? t("فہرست سے علاقہ چنیں یا اپنی جگہ دیں", "List se ilaqa chunein ya apni jagah dein", "Please pick an area from the list or share your location") : t("اپنا علاقہ لکھیں یا چنیں", "Apna ilaqa likhein ya chunein", "Please enter or choose your area")) : undefined}>
+              <AreaPicker id="f-area" value={worker.area} location={worker.location} invalid={has("area")} onChange={patchWorker} />
             </Field>
 
-            <Field label={t("کام کے اوقات", "Kaam ke auqat", "Working hours")} htmlFor="f-hours">
-              <div className="mb-2 flex flex-wrap gap-2">
-                {HOUR_PRESETS.map((preset) => {
-                  const label = t(preset.ur, preset.roman, preset.en);
-                  return (
-                    <Chip key={preset.en} active={worker.workingHours === label} onClick={() => patchWorker({ workingHours: label })}>
-                      {label}
-                    </Chip>
-                  );
-                })}
-              </div>
+            <Field label={t("کام کے اوقات (اختیاری)", "Kaam ke auqat (ikhtiyari)", "Working hours (optional)")} htmlFor="f-hours" action={<QuestionVoice id="field-hours" />}>
+              <HourPresets value={worker.workingHours} onPick={(workingHours) => patchWorker({ workingHours })} />
               <TextWithMic id="f-hours" field="workingHours" value={worker.workingHours} onChange={(workingHours) => patchWorker({ workingHours })} placeholder={t("یا خود لکھیں", "Ya khud likhein", "Or write your own")} />
             </Field>
 

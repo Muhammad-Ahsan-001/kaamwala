@@ -1,0 +1,138 @@
+{
+  "role-choice": {
+    "ur": "آپ کے محلے کا اڈا، اب آپ کے فون پر۔ اگر آپ کو کام چاہیے تو پہلا بٹن دبائیں۔ اگر کام کروانا ہے تو دوسرا بٹن دبائیں۔",
+    "en": "Your neighbourhood adda, now on your phone. If you want work, tap the first button. If you need work done, tap the second button."
+  },
+  "login-phone": {
+    "ur": "اپنا فون نمبر لکھیں اور کوڈ بھیجیں کا بٹن دبائیں۔",
+    "en": "Type your phone number, then tap the send code button."
+  },
+  "login-code": {
+    "ur": "اپنا کوڈ لکھیں اور آگے بڑھیں کا بٹن دبائیں۔",
+    "en": "Type your code, then tap the continue button."
+  },
+  "onboard-intro": {
+    "ur": "اپنے بارے میں بتائیں۔ اپنا نام، کام، تجربہ، علاقہ، ریٹ اور کام کے اوقات بولیں۔",
+    "en": "Tell us about yourself. Say your name, your trade, your experience, your area, your rate and your working hours."
+  },
+  "onboard-confirm": {
+    "ur": "کیا یہ ٹھیک ہے؟ اگر ہے تو نیچے کا بڑا بٹن دبائیں۔ کوئی بات بدلنی ہو تو اس کے ساتھ والا مائیک یا قلم دبائیں۔",
+    "en": "Is this right? If it is, tap the big button below. To change something, tap the mic or the pen next to it."
+  },
+  "field-name": {
+    "ur": "آپ کا نام کیا ہے؟",
+    "en": "What is your name?"
+  },
+  "field-trade": {
+    "ur": "آپ کیا کام کرتے ہیں؟",
+    "en": "What work do you do?"
+  },
+  "field-skills": {
+    "ur": "آپ کو اور کون کون سے کام آتے ہیں؟ جو آتے ہیں انہیں چن لیں۔",
+    "en": "What else can you do? Choose the ones you know."
+  },
+  "field-years": {
+    "ur": "آپ کتنے سال سے یہ کام کر رہے ہیں؟",
+    "en": "How many years have you been doing this work?"
+  },
+  "field-rate": {
+    "ur": "آپ ایک دن کے کتنے پیسے لیتے ہیں؟",
+    "en": "How much do you charge for one day?"
+  },
+  "field-area": {
+    "ur": "آپ کس علاقے میں کام کرتے ہیں؟",
+    "en": "Which area do you work in?"
+  },
+  "field-hours": {
+    "ur": "آپ کس وقت کام کرتے ہیں؟",
+    "en": "What hours do you work?"
+  },
+  "photos-intro": {
+    "ur": "پروفائل بن گئی۔ تصویریں لگانا اختیاری ہے۔ شناختی کارڈ کا صرف خفیہ کوڈ رکھا جاتا ہے، اور یہ سرکاری تصدیق نہیں ہے۔",
+    "en": "Your profile is ready. Adding photos is optional. For your CNIC we keep only a secret code, and this is not government verification."
+  },
+  "photo-profile": {
+    "ur": "اپنی ایک صاف تصویر لگائیں۔",
+    "en": "Add a clear photo of yourself."
+  },
+  "photo-work": {
+    "ur": "اپنے پچھلے کام کی تصویریں لگائیں۔ ان سے آپ کے ہنر پہچانے جائیں گے۔",
+    "en": "Add photos of your past work. They help us recognise your skills."
+  },
+  "photo-cnic": {
+    "ur": "اپنے شناختی کارڈ کی تصویر لیں یا اس کا نمبر لکھ دیں۔ یہ سرکاری تصدیق نہیں ہے۔",
+    "en": "Take a photo of your CNIC or type its number. This is not government verification."
+  },
+  "customer-intro": {
+    "ur": "اپنا نام اور علاقہ بتائیں۔",
+    "en": "Tell us your name and your area."
+  },
+  "customer-area": {
+    "ur": "آپ کس علاقے میں رہتے ہیں؟",
+    "en": "Which area do you live in?"
+  },
+  "customer-address": {
+    "ur": "آپ کے گھر کا پتا کیا ہے؟ یہ صرف بکنگ کے بعد دکھایا جائے گا۔",
+    "en": "What is your home address? It is shared only after a booking."
+  },
+  "customer-confirm": {
+    "ur": "کیا یہ تفصیل ٹھیک ہے؟ ٹھیک ہے تو نیچے کا بٹن دبائیں۔ بدلنی ہو تو قلم دبائیں۔",
+    "en": "Are these details right? If they are, tap the button below. To change something, tap the pen."
+  },
+  "agent-phone": {
+    "ur": "کاریگر کا فون نمبر کیا ہے؟",
+    "en": "What is the worker's phone number?"
+  },
+  "agent-name": {
+    "ur": "کاریگر کا نام کیا ہے؟",
+    "en": "What is the worker's name?"
+  },
+  "describe-problem": {
+    "ur": "کیا مسئلہ ہے؟ بول کر بتائیں، تصویر لگائیں یا لکھیں۔",
+    "en": "What is the problem? Say it, add a photo, or type it."
+  },
+  "job-trade": {
+    "ur": "آپ کو کس کام کا کاریگر چاہیے؟ نیچے سے چن لیں۔",
+    "en": "What kind of worker do you need? Choose from the list below."
+  },
+  "job-place": {
+    "ur": "کام کہاں کروانا ہے؟ اپنا علاقہ چن لیں۔",
+    "en": "Where is the job? Choose your area."
+  },
+  "job-days": {
+    "ur": "کام کتنے دن کا ہے؟",
+    "en": "How many days is the job for?"
+  },
+  "job-start": {
+    "ur": "کام کب سے شروع کرنا ہے؟ آج، کل، یا کوئی اور تاریخ چن لیں۔",
+    "en": "When should the job start? Choose today, tomorrow or another date."
+  },
+  "busy-how-long": {
+    "ur": "مصروف ہونا ہے؟ کتنی دیر کے لیے؟ ایک گھنٹہ، دو گھنٹے، آج کا دن، یا جب تک آپ خود نہ بدلیں۔",
+    "en": "Going busy? For how long? One hour, two hours, today, or until you switch back."
+  },
+  "busy-change": {
+    "ur": "وقت بدلنا ہے؟ ایک گھنٹہ، دو گھنٹے، آج کا دن، یا جب تک آپ خود نہ بدلیں۔",
+    "en": "Want to change the time? One hour, two hours, today, or until you switch back."
+  },
+  "review-rating": {
+    "ur": "کام کیسا لگا؟ ستارے دبا کر بتائیں، یا مائیک دبا کر بول دیں۔",
+    "en": "How was the work? Tap the stars, or tap the mic and say it."
+  },
+  "review-tags": {
+    "ur": "کیا اچھا لگا؟ جو باتیں ٹھیک ہیں انہیں چن لیں۔",
+    "en": "What was good? Choose the ones that fit."
+  },
+  "hirer-paid-on-time": {
+    "ur": "کیا گاہک نے پیسے وقت پر دیے؟",
+    "en": "Did the customer pay on time?"
+  },
+  "hirer-paid-extra": {
+    "ur": "کیا گاہک نے طے شدہ پیسوں سے زیادہ دیے؟",
+    "en": "Did the customer pay more than agreed?"
+  },
+  "hirer-behaviour": {
+    "ur": "گاہک کا رویہ کیسا تھا؟ اچھا، ٹھیک، یا برا؟",
+    "en": "How was the customer's behaviour? Good, okay or bad?"
+  }
+}

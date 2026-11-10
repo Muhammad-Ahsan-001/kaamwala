@@ -6,7 +6,7 @@ import { prisma } from "../db";
 import { suspendWorker } from "../domain/jobs";
 import { lockJob, lockWorkers, runTx, setStatus } from "../domain/tx";
 import { conflict, notFound } from "../errors";
-import { startOfDayPkt } from "../geo";
+import { addDaysIso, startOfDatePkt, startOfDayPkt, todayPkt } from "../geo";
 import { CLOSE_SUSPENDED, hub } from "../hub";
 import { jobInclude, toJob, workerCards } from "../serialize";
 
@@ -45,7 +45,10 @@ export async function adminRoutes(app: FastifyInstance) {
   const admin = { preHandler: requireRole("admin") };
 
   app.get("/admin/workers", admin, async () => {
-    const rows = await prisma.workerProfile.findMany({ include: { user: true }, orderBy: { createdAt: "desc" } });
+    const rows = await prisma.workerProfile.findMany({
+      include: { user: true, createdByAgent: { select: { name: true } } },
+      orderBy: { createdAt: "desc" },
+    });
     const cards = await workerCards(rows);
     const byId = new Map(rows.map((r) => [r.id, r]));
     return {
@@ -53,6 +56,7 @@ export async function adminRoutes(app: FastifyInstance) {
         ...c,
         phone: byId.get(c.id)?.user.phone ?? null,
         suspended: byId.get(c.id)?.user.suspended ?? false,
+        createdByAgent: byId.get(c.id)?.createdByAgent?.name ?? null,
       })),
     };
   });
@@ -91,11 +95,20 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get("/admin/disputes", admin, async () => {
     const rows = await prisma.job.findMany({
       where: { OR: [{ status: "disputed" }, { disputeReason: { not: null } }] },
-      include: jobInclude,
+      include: {
+        ...jobInclude,
+        assignments: { select: { workerId: true, active: true, worker: { select: { user: { select: { name: true } } } } } },
+      },
       orderBy: { updatedAt: "desc" },
     });
     return {
-      items: rows.map((j) => ({ ...toJob(j), disputeReason: j.disputeReason, disputeResolution: j.disputeResolution })),
+      items: rows.map((j) => ({
+        ...toJob(j),
+        disputeReason: j.disputeReason,
+        disputeResolution: j.disputeResolution,
+        disputedAt: j.disputedAt?.toISOString() ?? null,
+        workerNames: j.assignments.map((a) => a.worker.user.name ?? ""),
+      })),
     };
   });
 
@@ -129,7 +142,21 @@ export async function adminRoutes(app: FastifyInstance) {
 
   app.get("/admin/stats", admin, async () => {
     const now = new Date();
-    const [workers, jobs, customers, categories, availableNow, engagedNow, jobsToday, fees] = await Promise.all([
+    const today = todayPkt(now);
+    const days = [6, 5, 4, 3, 2, 1, 0].map((back) => addDaysIso(today, -back));
+    const [
+      workers,
+      jobs,
+      customers,
+      categories,
+      availableNow,
+      engagedNow,
+      jobsToday,
+      fees,
+      pendingWorkers,
+      disputes,
+      recentJobs,
+    ] = await Promise.all([
       prisma.workerProfile.groupBy({ by: ["status"], _count: { _all: true } }),
       prisma.job.groupBy({ by: ["status"], _count: { _all: true } }),
       prisma.user.count({ where: { role: "customer" } }),
@@ -138,6 +165,12 @@ export async function adminRoutes(app: FastifyInstance) {
       prisma.workerProfile.count({ where: { status: "engaged" } }),
       prisma.job.count({ where: { createdAt: { gte: startOfDayPkt(now) } } }),
       prisma.agentLedgerEntry.aggregate({ where: { createdAt: { gte: daysBack(7, now) } }, _sum: { fee: true } }),
+      prisma.workerProfile.count({ where: { approved: false, user: { suspended: false } } }),
+      prisma.job.count({ where: { status: "disputed" } }),
+      prisma.job.findMany({
+        where: { createdAt: { gte: startOfDatePkt(days[0] as string) } },
+        select: { createdAt: true },
+      }),
     ]);
     const toRecord = <T extends string>(rows: { status: T; _count: { _all: number } }[]) =>
       Object.fromEntries(rows.map((r) => [r.status, r._count._all]));
@@ -146,6 +179,12 @@ export async function adminRoutes(app: FastifyInstance) {
       engagedNow,
       jobsToday,
       agentFeesWeek: fees._sum.fee ?? 0,
+      pendingWorkers,
+      disputes,
+      jobsByDay: days.map((date) => ({
+        date,
+        count: recentJobs.filter((j) => todayPkt(j.createdAt) === date).length,
+      })),
       workersByStatus: toRecord(workers),
       jobsByStatus: toRecord(jobs),
       customers,

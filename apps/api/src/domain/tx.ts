@@ -4,7 +4,7 @@ import { prisma, type Tx } from "../db";
 import { conflict, notFound } from "../errors";
 import { hub } from "../hub";
 import { pushToUsers, type PushPayload } from "../push";
-import { jobInclude, offerInclude, toJob, toOffers, toOpenJobView, type JobFull } from "../serialize";
+import { jobInclude, offerInclude, toArea, toJob, toOffers, toOpenJobView, type JobFull } from "../serialize";
 import { openJobRecipients } from "./openJobs";
 
 const TX_OPTIONS = { maxWait: 10_000, timeout: 20_000 };
@@ -15,6 +15,7 @@ export class Effects {
   private jobs = new Set<string>();
   private offers: { id: string; type: "offer.created" | "offer.updated" }[] = [];
   private pushes: { userIds: string[]; payload: PushPayload }[] = [];
+  private closedOpenJobs: string[] = [];
 
   status(workerId: string, status: WorkerStatus, offlineUntil: Date | null): void {
     this.statuses.push({ workerId, status, offlineUntil });
@@ -32,6 +33,11 @@ export class Effects {
     this.pushes.push({ userIds, payload });
   }
 
+  /** Workers who never bid get no job.updated for this job, so their feeds need telling it has gone. */
+  jobClosed(id: string): void {
+    this.closedOpenJobs.push(id);
+  }
+
   async flush(): Promise<void> {
     for (const s of this.statuses) {
       hub.broadcast({
@@ -43,6 +49,7 @@ export class Effects {
     }
     await Promise.all([...this.jobs].map(publishJob));
     for (const offer of this.offers) await publishOffer(offer.id, offer.type);
+    for (const jobId of this.closedOpenJobs) hub.broadcast({ type: "job.closed", jobId });
     for (const { userIds, payload } of this.pushes) {
       void pushToUsers(userIds, payload).catch(() => undefined);
     }
@@ -78,10 +85,11 @@ async function publishJob(jobId: string): Promise<void> {
 async function publishOffer(id: string, type: "offer.created" | "offer.updated"): Promise<void> {
   const offer = await prisma.offer.findUnique({
     where: { id },
-    include: { ...offerInclude, job: { select: { customerId: true } } },
+    include: { ...offerInclude, job: { select: { customerId: true, lat: true, lng: true } } },
   });
   if (!offer) return;
-  const [dto] = await toOffers([offer]);
+  // The bidder hears this too, so the distance comes from the rounded spot they are allowed to see.
+  const [dto] = await toOffers([offer], { lat: toArea(offer.job.lat), lng: toArea(offer.job.lng) });
   if (dto) hub.toUsers([offer.job.customerId, offer.worker.userId], { type, offer: dto });
 }
 

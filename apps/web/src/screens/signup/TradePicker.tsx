@@ -31,9 +31,13 @@ export function TradePicker({
     }
     let active = true;
     const timer = setTimeout(() => {
-      void data.matchTrade(text).then((match) => {
-        if (active) setSuggestion(match);
-      });
+      data
+        .matchTrade(text)
+        .then((match) => {
+          if (active) setSuggestion(match);
+        })
+        // A suggestion is a convenience. Without one the list is still there.
+        .catch(() => undefined);
     }, 250);
     return () => {
       active = false;
@@ -134,7 +138,7 @@ export function SkillsPicker({
             }
           }}
           placeholder={t("اور ہنر لکھیں", "Aur hunar likhein", "Add another skill")}
-          className="field"
+          className="field min-w-0"
         />
         <IconButton icon={Plus} label={t("شامل کریں", "Shamil karein", "Add")} tone="brand" className="h-14 w-14" onClick={add} />
       </div>

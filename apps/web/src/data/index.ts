@@ -1,8 +1,8 @@
+import { withOffline } from "../pwa/offline-api";
 import type { DataApi } from "./api";
-import { mockApi } from "./mock";
+import { liveApi } from "./live";
 
 export * from "./types";
 export type { DataApi };
 
-/** The one place to swap the mock for the real API client. */
-export const data: DataApi = mockApi;
+export const data: DataApi = withOffline(liveApi);

@@ -1,21 +1,24 @@
-import { OnboardField, type ProblemAnalysis, type WorkerProfileDraft } from "@kaamwala/contracts";
+import { OnboardField, type CustomerDraft, type ProblemAnalysis, type WorkerProfileDraft } from "@kaamwala/contracts";
 import { detectUrgency, extractDurationDays } from "@kaamwala/jev";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { AREA_NAMES } from "../areas";
+import { AREA_NAMES, findArea } from "../areas";
 import { requireAuth } from "../auth";
-import { prisma } from "../db";
 import { MAX_DURATION_DAYS } from "../domain/days";
+import { priceEstimate } from "../domain/estimate";
 import { env } from "../env";
 import { AppError, aiUnavailable, badRequest } from "../errors";
 import {
   GeminiUnavailable,
   analyseProblem,
+  extractCustomer,
   extractOnboarding,
+  type CustomerExtract,
   type OnboardingExtract,
   type ProblemExtract,
 } from "../gemini";
 import { getActiveCategories, jev } from "../jev";
+import { speechFor } from "../speech";
 import { MAX_TEXT_CHARS, imageForAi, readBody, type FilePart } from "../uploads";
 
 const aiLimit = { rateLimit: { max: env.RATE_LIMIT_AI_PER_MIN, timeWindow: "1 minute" } };
@@ -68,19 +71,17 @@ function onlyField(draft: WorkerProfileDraft, field: OnboardField): WorkerProfil
   };
 }
 
-/** An estimate from the rates real workers in this category charge, never below the floor. */
-async function priceEstimate(categoryId: string | null): Promise<{ min: number | null; max: number | null }> {
-  if (!categoryId) return { min: null, max: null };
-  const category = getActiveCategories().find((c) => c.id === categoryId);
-  const rows = await prisma.workerProfile.findMany({
-    where: { categoryIds: { has: categoryId }, approved: true },
-    select: { rate: true },
-  });
-  const rates = rows.map((r) => r.rate).sort((a, b) => a - b);
-  const floor = category?.floorPrice ?? 0;
-  if (!rates.length) return { min: floor || null, max: null };
-  const at = (q: number) => rates[Math.floor((rates.length - 1) * q)] as number;
-  return { min: Math.max(floor, at(0.25)), max: Math.max(floor, at(0.75)) };
+/** Gemini's reading when there is one, otherwise what Jev can read from the words. Never a guess. */
+export function buildCustomerDraft(transcript: string, ai: CustomerExtract | null): CustomerDraft {
+  const hints = jev.parseProfile(transcript, { areas: AREA_NAMES });
+  const area = ai?.area ?? hints.area;
+  return {
+    name: ai?.name ?? hints.name,
+    area: area ? (findArea(area)?.name ?? area) : null,
+    address: ai?.address ?? null,
+    transcript,
+    source: ai ? "gemini" : "jev_only",
+  };
 }
 
 export async function buildAnalysis(text: string | null, ai: ProblemExtract | null): Promise<ProblemAnalysis> {
@@ -166,6 +167,22 @@ export async function aiRoutes(app: FastifyInstance) {
     }
   });
 
+  app.post("/ai/customer", { preHandler: requireAuth, config: aiLimit }, async (req) => {
+    const body = await readBody(req);
+    const text = body.fields.text?.trim() || null;
+    assertAudio(body.audio);
+    if (!body.audio && !text) throw badRequest("INPUT_REQUIRED", "Send audio or text.");
+
+    try {
+      const ai = await extractCustomer({ audio: body.audio, text });
+      return buildCustomerDraft(ai.transcript || text || "", ai);
+    } catch (err) {
+      if (!(err instanceof GeminiUnavailable)) throw err;
+      if (body.audio && !text) throw aiUnavailable(VOICE_UNAVAILABLE);
+      return buildCustomerDraft(text as string, null);
+    }
+  });
+
   app.post("/ai/problem", { preHandler: requireAuth, config: aiLimit }, async (req) => {
     const body = await readBody(req);
     const text = body.fields.text?.trim() || null;
@@ -191,6 +208,17 @@ export async function aiRoutes(app: FastifyInstance) {
       if (text) return buildAnalysis(text, null);
       throw aiUnavailable(body.audio ? VOICE_UNAVAILABLE : IMAGE_UNAVAILABLE);
     }
+  });
+
+  /** Spoken Urdu for lines with no recording, so a phone with no Urdu voice never reads them in English. */
+  app.post("/ai/speak", { preHandler: requireAuth, config: aiLimit }, async (req, reply) => {
+    const { text } = z.object({ text: z.string().trim().min(1).max(500) }).parse(req.body);
+    const audio = await speechFor(text).catch((err: unknown) => {
+      req.log.warn({ reason: err instanceof Error ? err.message.slice(0, 120) : "unknown" }, "speech failed");
+      return null;
+    });
+    if (!audio) throw aiUnavailable("Speech is not available right now.");
+    return reply.type("audio/mpeg").send(audio);
   });
 
   app.post("/ai/tts-text", { preHandler: requireAuth }, async (req) => {

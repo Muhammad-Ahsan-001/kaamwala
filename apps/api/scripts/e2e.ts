@@ -265,7 +265,7 @@ async function main() {
   );
   check("exactly one entry exists for that worker", (await prisma.agentLedgerEntry.count({ where: { workerId: byAgent.body.id } })) === 1);
   check("agent-created worker has not done OTP yet", byAgent.body.phoneChecked === false, byAgent.body.phoneChecked);
-  check("agent-created worker has no CNIC on file yet", byAgent.body.cnicChecked === false, byAgent.body.cnicChecked);
+  check("agent-created worker has no CNIC on file yet", byAgent.body.cnicDuplicateChecked === false, byAgent.body.cnicDuplicateChecked);
 
   for (const [name, res] of [
     ["customer GET", await api("GET", "/admin/settings", { token: customer.token })],
@@ -306,7 +306,7 @@ async function main() {
   check("that profile is removed", (await api("GET", `/workers/${lateDup.body.id}`)).status === 404);
 
   const withCnic = await agentSignup({ name: "Karim Bakhsh", forPhone: "03007000013", cnic: "61101-7654321-3" });
-  check("signup with a good CNIC succeeds", withCnic.status === 201 && withCnic.body.cnicChecked === true, withCnic.body);
+  check("signup with a good CNIC succeeds", withCnic.status === 201 && withCnic.body.cnicDuplicateChecked === true, withCnic.body);
   const agentWorkerLogin = await login("+923007000013");
   const afterOtp = await api<WorkerCard>("GET", `/workers/${agentWorkerLogin.workerId}`);
   check("phone is marked checked once OTP completes", afterOtp.body.phoneChecked === true, afterOtp.body.phoneChecked);
@@ -499,13 +499,13 @@ async function main() {
   check("on-time rate comes from the job's own timestamps", next?.trust.onTimeRate === 1, next?.trust.onTimeRate);
   check("response time comes from the real accept time", typeof next?.trust.avgResponseMinutes === "number" && (next?.trust.avgResponseMinutes as number) < 5, next?.trust.avgResponseMinutes);
   check("typed worker's phone is checked after OTP", next?.phoneChecked === true, next?.phoneChecked);
-  check("CNIC on file shows as checked", next?.cnicChecked === true, next?.cnicChecked);
+  check("CNIC on file shows as checked", next?.cnicDuplicateChecked === true, next?.cnicDuplicateChecked);
   const seededWorkers = (await api("GET", "/admin/workers", { token: (await login("+923000000001")).token })).body.items as WorkerCard[];
   const seededRates = seededWorkers.filter((w) => w.trust.jobCount > 0).map((w) => w.trust.onTimeRate as number);
   check("seeded on-time rates vary between 0 and 1", seededRates.every((r) => r >= 0 && r <= 1) && new Set(seededRates).size > 2, [...new Set(seededRates)]);
   check("seeded workers have response times", seededWorkers.filter((w) => w.trust.jobCount > 0).every((w) => typeof w.trust.avgResponseMinutes === "number"));
   check("a worker with no replies has a null response time", seededWorkers.some((w) => w.trust.jobCount === 0 && w.trust.avgResponseMinutes === null));
-  check("seeded CNIC flags are mixed", seededWorkers.some((w) => w.cnicChecked) && seededWorkers.some((w) => !w.cnicChecked));
+  check("seeded CNIC flags are mixed", seededWorkers.some((w) => w.cnicDuplicateChecked) && seededWorkers.some((w) => !w.cnicDuplicateChecked));
   const profile = await api("GET", `/workers/${worker.workerId}`);
   check("worker profile lists reviews", profile.body.reviews.length === 1, profile.body.reviews);
   customerWs.close();
@@ -1426,6 +1426,146 @@ async function main() {
   check("the sweep does not put them back", (await statusOf(faisal.workerId as string)) === "offline");
   await api("POST", `/admin/workers/${faisal.workerId}/approve`, { token: admin.token });
 
+  section("Regression: what the screens read");
+  const naila = await login("+923007003001", "customer");
+  const signedUp = await api("POST", "/customers", { token: naila.token, body: { name: "Naila Perveen Qureshi", area: "G-9", address: "Gali 14, Makan 22" } });
+  check("a customer can give a home address", signedUp.status === 201 && signedUp.body.address === "Gali 14, Makan 22", signedUp.body);
+  const javaid = await login("+923007003002", "worker");
+  const javaidCard = await api<WorkerCard>("POST", "/workers", { token: javaid.token, body: { name: "Javaid Bijli Wala", area: "G-9", categoryIds: ["electrician"], rate: 1000, years: 3 } });
+  const javaidId = javaidCard.body.id;
+  const nailaMe = await api("GET", "/me", { token: naila.token });
+  check("your own profile has your address and location", nailaMe.body.hirer.address === "Gali 14, Makan 22" && nailaMe.body.hirer.location.lat > 33, nailaMe.body.hirer);
+  const nailaSeen = await api("GET", `/customers/${naila.userId}`, { token: javaid.token });
+  check("nobody else's view of it does", nailaSeen.body.address === null && nailaSeen.body.location === null, nailaSeen.body);
+  check("a customer with no history shows no paid-on-time figure", nailaSeen.body.paidOnTimePct === null && nailaSeen.body.paidExtraCount === 0 && nailaSeen.body.jobTypes.length === 0, nailaSeen.body);
+  const nailaByMe = await api("GET", "/customers/me", { token: naila.token });
+  check("'me' reads your own customer profile", nailaByMe.body.id === naila.userId && nailaByMe.body.address !== null && Array.isArray(nailaByMe.body.reviews), nailaByMe.body);
+  const edited = await api("PATCH", "/customers/me", { token: naila.token, body: { area: "F-8" } });
+  check("editing one customer field keeps the others", edited.status === 200 && edited.body.area === "F-8" && edited.body.address === "Gali 14, Makan 22" && edited.body.name === "Naila Perveen Qureshi", edited.body);
+  await api("PATCH", "/customers/me", { token: naila.token, body: { area: "G-9", location: G9 } });
+
+  const estimated = await api<Job>("POST", "/jobs", { token: naila.token, body: jobBody({ mode: "open", priceMin: 900, priceMax: 1400 }) });
+  const unpriced = await api<Job>("POST", "/jobs", { token: naila.token, body: jobBody({ mode: "open" }) });
+  const lowEstimate = await api<Job>("POST", "/jobs", { token: naila.token, body: jobBody({ mode: "open", priceMin: 100, priceMax: 50 }) });
+  const javaidFeed = (await api("GET", "/jobs/open", { token: javaid.token })).body.items as any[];
+  const feedItem = (id: string) => javaidFeed.find((j) => j.id === id);
+  check("the feed shows the customer's estimate", feedItem(estimated.body.id)?.priceMin === 900 && feedItem(estimated.body.id)?.priceMax === 1400, feedItem(estimated.body.id));
+  check("the feed shows how far the job is", typeof feedItem(estimated.body.id)?.distanceKm === "number" && feedItem(estimated.body.id).distanceKm < 2, feedItem(estimated.body.id)?.distanceKm);
+  check("a job with no estimate shows what the trade charges", feedItem(unpriced.body.id)?.priceMin >= 500 && feedItem(unpriced.body.id)?.priceMax >= feedItem(unpriced.body.id)?.priceMin, feedItem(unpriced.body.id));
+  check("an estimate is never below the floor", feedItem(lowEstimate.body.id)?.priceMin === 500 && feedItem(lowEstimate.body.id)?.priceMax === 500, feedItem(lowEstimate.body.id));
+  await api("POST", `/jobs/${estimated.body.id}/offers`, { token: javaid.token, body: { price: 1000 } });
+  const customerOffers = (await api("GET", `/jobs/${estimated.body.id}/offers`, { token: naila.token })).body.items as any[];
+  check("the customer sees how far each bidder is", typeof customerOffers[0]?.worker.distanceKm === "number", customerOffers[0]?.worker.distanceKm);
+  const bidderOffers = (await api("GET", `/jobs/${estimated.body.id}/offers`, { token: javaid.token })).body.items as any[];
+  check("the bidder cannot work out the exact spot from it", bidderOffers[0]?.worker.distanceKm === undefined, bidderOffers[0]?.worker.distanceKm);
+  for (const job of [estimated, unpriced, lowEstimate]) await api("POST", `/jobs/${job.body.id}/cancel`, { token: naila.token });
+
+  const nailaJob = await api<Job>("POST", "/jobs", { token: naila.token, body: jobBody({ mode: "direct", workerId: javaidId, proposedPrice: 1000 }) });
+  check("the address stays hidden before the booking", nailaJob.body.address === null, nailaJob.body.address);
+  const earlyDraft = await api("POST", `/jobs/${nailaJob.body.id}/reviews/draft`, { token: naila.token, form: audioForm() });
+  check("a review cannot be drafted before the job is done", earlyDraft.status === 409, earlyDraft);
+  await api("POST", `/jobs/${nailaJob.body.id}/accept`, { token: javaid.token });
+  const nailaFlow = await agreeAndEngage(nailaJob.body, naila, { ...javaid, workerId: javaidId });
+  check("the address is still hidden with one confirmation", nailaFlow.first.body.address === null, nailaFlow.first.body.address);
+  check("the worker gets the address once booked", nailaFlow.second.body.address === "Gali 14, Makan 22", nailaFlow.second.body.address);
+  const engagedByWorker = await api<Job>("GET", `/jobs/${nailaJob.body.id}`, { token: javaid.token });
+  check("and can read it on the job", engagedByWorker.body.address === "Gali 14, Makan 22", engagedByWorker.body.address);
+  anon.events.length = 0; // so the wait below sees only the return to available
+  await api("POST", `/jobs/${nailaJob.body.id}/complete`, { token: javaid.token });
+
+  const money = await api("GET", "/workers/me/earnings", { token: javaid.token });
+  check("earnings count the jobs paid", money.body.jobCount === 1, money.body.jobCount);
+  check("earnings give the last 7 days, oldest first", money.body.daily.length === 7 && money.body.daily[6].date === karachiToday && money.body.daily[0].date === plusDays(-6), money.body.daily);
+  check("today's bar matches today's total", money.body.daily[6].amount === money.body.today && money.body.today === 1000, money.body.daily);
+
+  const strangerDraft = await api("POST", `/jobs/${nailaJob.body.id}/reviews/draft`, { token: buyer.token, form: audioForm() });
+  check("a stranger cannot draft a review", strangerDraft.status === 403, strangerDraft);
+  const noAudioDraft = await api("POST", `/jobs/${nailaJob.body.id}/reviews/draft`, { token: naila.token, body: {} });
+  check("a review draft needs audio", noAudioDraft.status === 400, noAudioDraft);
+  const noAiDraft = await api("POST", `/jobs/${nailaJob.body.id}/reviews/draft`, { token: naila.token, form: audioForm() });
+  check("with no AI a review draft fails honestly", noAiDraft.status === 503 && noAiDraft.body.error.code === "AI_UNAVAILABLE", noAiDraft);
+
+  const answered = await api("POST", `/jobs/${nailaJob.body.id}/reviews`, { token: javaid.token, body: { paidOnTime: true, paidExtra: true, behaviour: "good" } });
+  check("a worker's three answers make a review", answered.status === 201 && answered.body.rating === 5, answered);
+  check("and are saved as trust tags", ["waqt par adaigi", "extra diya", "acha rawaiya"].every((t) => answered.body.tags.includes(t)), answered.body.tags);
+  await api("POST", `/jobs/${nailaJob.body.id}/reviews`, { token: naila.token, body: { rating: 4, tags: ["saaf kaam"] } });
+
+  check("the worker is free for the next job", await anon.sawStatus(javaidId, "available", 12_000));
+  const secondNailaJob = await api<Job>("POST", "/jobs", { token: naila.token, body: jobBody({ mode: "direct", workerId: javaidId }) });
+  await api("POST", `/jobs/${secondNailaJob.body.id}/accept`, { token: javaid.token });
+  await agreeAndEngage(secondNailaJob.body, naila, { ...javaid, workerId: javaidId });
+  await api("POST", `/jobs/${secondNailaJob.body.id}/complete`, { token: javaid.token });
+  await api("POST", `/jobs/${secondNailaJob.body.id}/reviews`, { token: javaid.token, body: { paidOnTime: false, behaviour: "okay" } });
+  const nailaDetail = await api("GET", `/customers/${naila.userId}`, { token: javaid.token });
+  check("paid-on-time is the share of workers who said so", nailaDetail.body.paidOnTimePct === 50, nailaDetail.body.paidOnTimePct);
+  check("paid-extra counts the workers who said so", nailaDetail.body.paidExtraCount === 1, nailaDetail.body.paidExtraCount);
+  check("a customer's job types and reviews are there", nailaDetail.body.jobTypes[0].categoryId === "electrician" && nailaDetail.body.reviews.length === 2, nailaDetail.body.reviews?.length);
+  const hirerReview = nailaDetail.body.reviews[0];
+  check("a review of a customer names the worker by first name only", hirerReview.authorName === "Javaid" && hirerReview.categoryId === "electrician", hirerReview);
+
+  const javaidDetail = await api("GET", `/workers/${javaidId}`);
+  const workerReview = javaidDetail.body.reviews[0];
+  check("a worker's review names the customer by first name only", workerReview.authorName === "Naila" && !JSON.stringify(javaidDetail.body.reviews).includes("Qureshi"), workerReview);
+  check("and gives their area and the kind of job", workerReview.authorArea === "G-9" && workerReview.categoryId === "electrician", workerReview);
+  check("a worker with no photos has no past work", javaidDetail.body.pastWork.length === 0, javaidDetail.body.pastWork);
+  check("the card says a CNIC check is about duplicates", javaidDetail.body.cnicDuplicateChecked === false && !("cnicChecked" in javaidDetail.body), Object.keys(javaidDetail.body));
+
+  const photo = await api("POST", "/workers/me/photos", { token: javaid.token, form: imageForm() });
+  const withPhoto = await api("GET", `/workers/${javaidId}`);
+  check("a past-work photo with no AI has no label, not an invented one", withPhoto.body.pastWork.length === 1 && withPhoto.body.pastWork[0].url === photo.body.urls[0] && withPhoto.body.pastWork[0].skill === null, withPhoto.body.pastWork);
+  await prisma.workerProfile.update({ where: { id: javaidId }, data: { photoSkills: { [photo.body.urls[0] as string]: "Fan repair" } } });
+  const labelled = await api("GET", `/workers/${javaidId}`);
+  check("a label Gemini gave is shown with its photo", labelled.body.pastWork[0].skill === "Fan repair", labelled.body.pastWork);
+  const profileForm = imageForm();
+  profileForm.append("kind", "profile");
+  await api("POST", "/workers/me/photos", { token: javaid.token, form: profileForm });
+  check("a profile photo is not past work", (await api("GET", `/workers/${javaidId}`)).body.pastWork.length === 1);
+
+  const customerText = await api("POST", "/ai/customer", { token: naila.token, body: { text: "Mera naam Ayesha Malik hai, G-9 mein rehti hoon" } });
+  check("a customer can be read from typed words", customerText.status === 200 && customerText.body.name === "Ayesha Malik" && customerText.body.area === "G-9", customerText.body);
+  check("and it says Jev did it", customerText.body.source === "jev_only" && customerText.body.address === null, customerText.body);
+  const customerVoice = await api("POST", "/ai/customer", { token: naila.token, form: audioForm() });
+  check("a spoken customer sign-up with no AI returns 503", customerVoice.status === 503 && customerVoice.body.error.code === "AI_UNAVAILABLE", customerVoice);
+  check("the customer read route needs a sign-in", (await api("POST", "/ai/customer", { body: { text: "x" } })).status === 401);
+
+  const matched = await api("GET", `/categories/match?q=${encodeURIComponent("pankha theek karta hoon")}`);
+  check("matchTrade finds a trade with Jev", matched.body.category?.id === "electrician" && matched.body.skills.includes("Fan repair"), matched.body);
+  const unmatched = await api("GET", `/categories/match?q=${encodeURIComponent("zzqq xxyy")}`);
+  check("matchTrade says so when it cannot", unmatched.status === 200 && unmatched.body.category === null && unmatched.body.confidence === 0, unmatched.body);
+  check("matchTrade needs words", (await api("GET", "/categories/match?q=")).status === 400);
+
+  const rated = (await api("GET", `/workers?lat=${G9.lat}&lng=${G9.lng}&radiusKm=60&minRating=4.5`)).body.items as WorkerCard[];
+  check("search can ask for top-rated workers only", rated.length > 0 && rated.every((w) => w.trust.rating >= 4.5), rated.map((w) => w.trust.rating));
+
+  const adminStats = await api("GET", "/admin/stats", { token: admin.token });
+  check("stats give the last 7 days of jobs", adminStats.body.jobsByDay.length === 7 && adminStats.body.jobsByDay[6].date === karachiToday, adminStats.body.jobsByDay);
+  check("today's bar matches jobsToday", adminStats.body.jobsByDay[6].count === adminStats.body.jobsToday, adminStats.body.jobsByDay);
+  const openDisputes = await prisma.job.count({ where: { status: "disputed" } });
+  check("stats count open disputes", adminStats.body.disputes === openDisputes, adminStats.body.disputes);
+  const pendingBefore = adminStats.body.pendingWorkers as number;
+  await prisma.workerProfile.update({ where: { id: javaidId }, data: { approved: false } });
+  const pendingStats = await api("GET", "/admin/stats", { token: admin.token });
+  check("stats count workers waiting for approval", pendingStats.body.pendingWorkers === pendingBefore + 1, pendingStats.body.pendingWorkers);
+  await prisma.workerProfile.update({ where: { id: javaidId }, data: { approved: true } });
+
+  const disputedList = (await api("GET", "/admin/disputes", { token: admin.token })).body.items as any[];
+  const withWorker = disputedList.find((d) => d.id === unworked.body.id);
+  check("a dispute names the workers and when it opened", withWorker?.workerNames?.length === 1 && typeof withWorker.disputedAt === "string", withWorker);
+  const rows = (await api("GET", "/admin/workers", { token: admin.token })).body.items as any[];
+  check("the admin list says which agent signed a worker up", rows.find((w) => w.id === byAgent.body.id)?.createdByAgent === "Bashir Ahmed (Field Agent)", rows.find((w) => w.id === byAgent.body.id)?.createdByAgent);
+  check("and null for a self sign-up", rows.find((w) => w.id === javaidId)?.createdByAgent === null);
+
+  await api("POST", "/push/subscribe", { token: naila.token, body: { endpoint: "https://fcm.googleapis.com/fcm/send/e2e-unsub", keys: { p256dh: "abc", auth: "def" } } });
+  await api("POST", "/push/unsubscribe", { token: javaid.token, body: { endpoint: "https://fcm.googleapis.com/fcm/send/e2e-unsub" } });
+  check("someone else cannot remove your push subscription", (await prisma.pushSubscription.count({ where: { endpoint: { endsWith: "e2e-unsub" } } })) === 1);
+  await api("POST", "/push/unsubscribe", { token: naila.token, body: { endpoint: "https://fcm.googleapis.com/fcm/send/e2e-unsub" } });
+  check("you can", (await prisma.pushSubscription.count({ where: { endpoint: { endsWith: "e2e-unsub" } } })) === 0);
+
+  await api("POST", `/admin/workers/${javaidId}/suspend`, { token: admin.token });
+  const suspendedMe = await api("GET", "/me", { token: javaid.token });
+  check("a suspended account gets its own error code", suspendedMe.status === 403 && suspendedMe.body.error.code === "ACCOUNT_SUSPENDED", suspendedMe);
+  await api("POST", `/admin/workers/${javaidId}/approve`, { token: admin.token });
+
   section("Result");
   anon.close();
   console.log(`\n${passed} passed, ${failures.length} failed`);
@@ -1440,4 +1580,8 @@ main()
     console.error(err);
     process.exitCode = 1;
   })
-  .finally(() => prisma.$disconnect());
+  // Open sockets would otherwise keep a run that threw alive for ever.
+  .finally(async () => {
+    await prisma.$disconnect();
+    process.exit();
+  });

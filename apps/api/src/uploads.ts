@@ -5,7 +5,7 @@ import type { FastifyRequest } from "fastify";
 import sharp from "sharp";
 import { env } from "./env";
 import { AppError, badRequest } from "./errors";
-import { audioBytesMatch, audioFileName, audioSignatureValid, isHeic, signAudio } from "./media";
+import { audioBytesMatch, audioFileName, audioSignatureValid, isHeic, isPdf, signAudio } from "./media";
 
 export const uploadRoot = path.resolve(env.UPLOAD_DIR);
 
@@ -67,6 +67,11 @@ export async function imageForAi(input: Buffer): Promise<FilePart> {
     if (isHeic(input)) return { data: input, mimetype: "image/heic" };
     throw new AppError(415, "INVALID_IMAGE", NOT_AN_IMAGE);
   }
+}
+
+/** For a CNIC: a photo or a PDF scan, for the AI only. Like imageForAi, nothing is written to disk. */
+export async function documentForAi(input: Buffer): Promise<FilePart> {
+  return isPdf(input) ? { data: input, mimetype: "application/pdf" } : imageForAi(input);
 }
 
 const OWN_IMAGE = /^[0-9a-f-]{36}\.webp$/;

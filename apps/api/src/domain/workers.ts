@@ -23,6 +23,7 @@ export interface SearchInput {
   radiusKm?: number | undefined;
   categoryId?: string | undefined;
   q?: string | undefined;
+  minRating?: number | undefined;
 }
 
 export async function searchWorkers(input: SearchInput) {
@@ -68,6 +69,8 @@ export async function searchWorkers(input: SearchInput) {
     const radius = input.radiusKm ?? 10;
     items = items.filter((w) => (w.distanceKm ?? 0) <= radius);
   }
+  const { minRating } = input;
+  if (minRating !== undefined) items = items.filter((w) => w.trust.rating >= minRating);
   return { items: sortWorkers(items), detected };
 }
 

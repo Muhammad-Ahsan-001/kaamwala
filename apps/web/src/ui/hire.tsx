@@ -1,16 +1,177 @@
-import { CalendarDays, CheckCheck, Lock, Minus, Plus } from "lucide-react";
-import type { JobDay } from "../data";
-import { rupees } from "../data/labels";
+import { CalendarDays, CheckCheck, Lock, MapPin, Minus, Plus, Search } from "lucide-react";
+import { useMemo, useState } from "react";
+import { data, type Area, type JobDay, type LatLng, type ProblemAnalysis } from "../data";
+import { areaName, rupees } from "../data/labels";
 import { cue } from "../lib/audio";
 import { MAX_DAYS, MAX_START_AHEAD, MIN_DAYS, addDays, dateLabel, rangeLabel, today } from "../lib/dates";
-import { useSettings } from "../lib/settings";
-import { Card, Chip, cx } from "./primitives";
+import { useSettings, type Lang } from "../lib/settings";
+import { useData } from "../lib/useData";
+import { Async, type Query } from "./async";
+import { Auto, Card, Chip, Sheet, cx } from "./primitives";
+import { Asked } from "./QuestionVoice";
 
 const DAY_PRESETS = [1, 2, 3, 5, 7];
 
 export type Schedule = { durationDays: number; startDate: string };
 
 export const defaultSchedule = (durationDays = 1): Schedule => ({ durationDays, startDate: today() });
+
+/** A schedule carried in a link, kept within what a booking allows. */
+export function scheduleFromLink(params: URLSearchParams): Schedule {
+  const days = Number(params.get("days"));
+  const start = params.get("start") ?? "";
+  const first = today();
+  return {
+    durationDays: Number.isInteger(days) && days >= MIN_DAYS && days <= MAX_DAYS ? days : MIN_DAYS,
+    startDate: /^\d{4}-\d{2}-\d{2}$/.test(start) && start >= first && start <= addDays(first, MAX_START_AHEAD) ? start : first,
+  };
+}
+
+export type DescribeMode = "voice" | "photo" | "text";
+
+/** The problem just described. It waits here while the customer looks at workers, so it goes with their request. */
+export type DescribedProblem = {
+  analysis: ProblemAnalysis;
+  /** Set only when the customer corrected the trade. */
+  chosenCategory: string | null;
+  schedule: Schedule;
+  text: string;
+  photo: Blob | null;
+  mode: DescribeMode;
+};
+
+let describedProblem: DescribedProblem | null = null;
+
+export const recallProblem = () => describedProblem;
+export const rememberProblem = (problem: DescribedProblem) => {
+  describedProblem = problem;
+};
+export const forgetProblem = () => {
+  describedProblem = null;
+};
+
+/** What the worker reads: the customer's own words when there are any. */
+export function problemDescription(problem: Pick<DescribedProblem, "analysis" | "text">): string {
+  return (problem.analysis.transcript?.trim() || problem.text.trim() || problem.analysis.summary.trim()).slice(0, 2000);
+}
+
+export type JobPlace = { area: string; location: LatLng };
+
+const placeOf = (area: Area): JobPlace => ({ area: area.name, location: { lat: area.lat, lng: area.lng } });
+
+function nearestArea(point: LatLng, areas: Area[]): Area | null {
+  const gap = (area: Area) => (area.lat - point.lat) ** 2 + (area.lng - point.lng) ** 2;
+  return areas.reduce<Area | null>((best, area) => (!best || gap(area) < gap(best) ? area : best), null);
+}
+
+/** Sector codes are written the same in Urdu. Named places use their Urdu name. */
+export function placeName(name: string, areas: Area[] | null, lang: Lang): string {
+  if (lang !== "ur" || /^[A-Z]-\d+$/.test(name)) return name;
+  return areas?.find((area) => area.name === name)?.nameUr ?? areaName(name, lang);
+}
+
+/** Where a customer's job is: their saved place, or an area they pick. Never an invented location. */
+export function useJobPlace() {
+  const hirer = useData(() => data.getHirer("me"), []);
+  const areas = useData(() => data.getAreas(), []);
+  const [picked, setPicked] = useState<JobPlace | null>(null);
+
+  const saved = useMemo<JobPlace | null>(() => {
+    const profile = hirer.data;
+    const list = areas.data ?? [];
+    if (!profile) return null;
+    if (profile.location) {
+      const area = profile.area ?? nearestArea(profile.location, list)?.name;
+      return area ? { area, location: profile.location } : null;
+    }
+    const named = list.find((area) => area.name.toLowerCase() === profile.area?.toLowerCase());
+    return named ? placeOf(named) : null;
+  }, [hirer.data, areas.data]);
+
+  const pick = (area: Area) => {
+    const place = placeOf(area);
+    setPicked(place);
+    // The first area this customer gives is saved, so they are not asked again. A later pick is for this job only.
+    if (hirer.data && !hirer.data.area) void data.updateMyCustomer(place).catch(() => undefined);
+  };
+
+  return { place: picked ?? saved, areas, loading: hirer.loading || areas.loading, pick };
+}
+
+/** Every area the app knows, from the API, with a search box. */
+export function AreaSheet({ areas, onPick, onClose }: { areas: Query<Area[]>; onPick: (area: Area) => void; onClose: () => void }) {
+  const { t, lang } = useSettings();
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLowerCase();
+
+  return (
+    <Sheet title={t("علاقہ چنیں", "Ilaqa chunein", "Choose an area")} onClose={onClose}>
+      <div className="sticky -top-5 z-10 -mx-1 bg-surface px-1 pb-2 pt-1">
+        <div className="relative">
+          <Search className="pointer-events-none absolute start-3 top-1/2 h-5 w-5 -translate-y-1/2 text-faint" aria-hidden />
+          <input
+            type="search"
+            dir="auto"
+            className="field ps-11"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            aria-label={t("علاقہ تلاش کریں", "Ilaqa talash karein", "Search areas")}
+            placeholder={t("جیسے G-9 یا صدر", "Jaise G-9 ya Saddar", "e.g. G-9 or Saddar")}
+          />
+        </div>
+      </div>
+      <Async query={areas}>
+        {(list) => {
+          const shown = [...list]
+            .filter((area) => !needle || area.name.toLowerCase().includes(needle) || area.nameUr.includes(needle))
+            .sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
+          if (shown.length === 0) return <p className="py-4 text-center text-soft">{t("یہ علاقہ نہیں ملا", "Ye ilaqa nahi mila", "No area found")}</p>;
+          return (
+            <div className="grid grid-cols-2 gap-2">
+              {shown.map((area) => (
+                <button key={area.name} type="button" onClick={() => onPick(area)} className="min-h-12 rounded-2xl border border-line bg-page px-2 font-semibold transition active:scale-95">
+                  <Auto text={placeName(area.name, list, lang)} />
+                </button>
+              ))}
+            </div>
+          );
+        }}
+      </Async>
+    </Sheet>
+  );
+}
+
+/** "Kaam kahan hai?": asks for an area when none is known yet. */
+export function JobPlaceRow({ jobPlace }: { jobPlace: ReturnType<typeof useJobPlace> }) {
+  const { t, lang } = useSettings();
+  const [open, setOpen] = useState(false);
+  const { place, areas, loading, pick } = jobPlace;
+  const missing = !place && !loading;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={cx("flex min-h-14 w-full items-center gap-2 rounded-2xl border px-3 text-start font-semibold transition active:scale-[0.99]", missing ? "border-amber-400 bg-amber-50" : "border-line bg-surface")}
+      >
+        <MapPin className="h-5 w-5 shrink-0 text-brand-600" aria-hidden />
+        <span className="min-w-0 flex-1 truncate">{place ? <Auto text={placeName(place.area, areas.data, lang)} /> : loading ? "…" : t("پہلے علاقہ چنیں", "Pehle ilaqa chunein", "Choose your area first")}</span>
+        <span className="shrink-0 text-sm font-bold text-brand-700">{place ? t("بدلیں", "Badlein", "Change") : t("چنیں", "Chunein", "Choose")}</span>
+      </button>
+      {open && (
+        <AreaSheet
+          areas={areas}
+          onClose={() => setOpen(false)}
+          onPick={(area) => {
+            pick(area);
+            setOpen(false);
+          }}
+        />
+      )}
+    </>
+  );
+}
 
 /** "Kitne din?" and "Kab se?": used by every way of hiring. */
 export function DurationPicker({ value, onChange }: { value: Schedule; onChange: (next: Schedule) => void }) {
@@ -30,7 +191,9 @@ export function DurationPicker({ value, onChange }: { value: Schedule; onChange:
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="mb-2 text-lg">{t("کتنے دن؟", "Kitne din?", "How many days?")}</h3>
+        <Asked voice="job-days" className="mb-2">
+          <h3 className="text-lg">{t("کتنے دن؟", "Kitne din?", "How many days?")}</h3>
+        </Asked>
         <div className="grid grid-cols-5 gap-2">
           {DAY_PRESETS.map((days) => (
             <button
@@ -58,7 +221,9 @@ export function DurationPicker({ value, onChange }: { value: Schedule; onChange:
       </div>
 
       <div>
-        <h3 className="mb-2 text-lg">{t("کب سے؟", "Kab se?", "Starting when?")}</h3>
+        <Asked voice="job-start" className="mb-2">
+          <h3 className="text-lg">{t("کب سے؟", "Kab se?", "Starting when?")}</h3>
+        </Asked>
         <div className="flex flex-wrap items-center gap-2">
           <Chip active={startDate === first} onClick={() => onChange({ ...value, startDate: first })}>
             {t("آج", "Aaj", "Today")}
@@ -75,6 +240,13 @@ export function DurationPicker({ value, onChange }: { value: Schedule; onChange:
               max={last}
               value={startDate}
               aria-label={t("تاریخ چنیں", "Tareekh chunein", "Pick a date")}
+              onClick={(event) => {
+                try {
+                  event.currentTarget.showPicker?.();
+                } catch {
+                  // Some browsers only open it themselves.
+                }
+              }}
               onChange={(event) => {
                 const picked = event.target.value;
                 if (picked && picked >= first && picked <= last) onChange({ ...value, startDate: picked });

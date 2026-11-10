@@ -4,7 +4,7 @@ import type { FastifyRequest } from "fastify";
 import { SignJWT, jwtVerify } from "jose";
 import { prisma } from "./db";
 import { env } from "./env";
-import { badRequest, forbidden, unauthorized } from "./errors";
+import { badRequest, forbidden, suspended, unauthorized } from "./errors";
 
 const secret = new TextEncoder().encode(env.JWT_SECRET);
 
@@ -51,7 +51,7 @@ export async function requireAuth(req: FastifyRequest): Promise<void> {
   if (!claims) throw unauthorized();
   const user = await prisma.user.findUnique({ where: { id: claims.sub }, include: { workerProfile: true } });
   if (!user) throw unauthorized();
-  if (user.suspended) throw forbidden("This account is suspended.");
+  if (user.suspended) throw suspended();
   const { workerProfile, ...rest } = user;
   req.auth = { user: rest, worker: workerProfile };
 }

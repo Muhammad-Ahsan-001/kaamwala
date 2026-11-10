@@ -32,6 +32,11 @@ export function audioBytesMatch(data: Buffer, mime: string): boolean {
   return SIGNATURES[mime]?.(data) ?? false;
 }
 
+/** The declared type is only a claim. Every PDF starts with these bytes. */
+export function isPdf(data: Buffer): boolean {
+  return ascii(data, 0, 5) === "%PDF-";
+}
+
 const HEIC_BRANDS = new Set(["heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1"]);
 
 export function isHeic(data: Buffer): boolean {

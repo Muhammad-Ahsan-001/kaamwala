@@ -1,5 +1,6 @@
 import { canonicalText } from "@kaamwala/jev";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { ReviewDraft } from "@kaamwala/contracts";
 import { z } from "zod";
 import { authOf, requireAuth } from "../auth";
 import { prisma } from "../db";
@@ -24,6 +25,8 @@ import {
   workerAccept,
   workerDecline,
 } from "../domain/jobs";
+import { recallReading, readingKey, rememberReading, type ReviewReading } from "../domain/reviewDrafts";
+import { BEHAVIOUR_RATING, hirerTagsFrom } from "../domain/trust";
 import { env } from "../env";
 import { aiUnavailable, badRequest, conflict, forbidden, notFound } from "../errors";
 import { GeminiUnavailable, summariseReview, transcribe } from "../gemini";
@@ -52,6 +55,8 @@ const CreateJob = z
     scheduledFor: z.string().datetime().optional(),
     photoUrls: z.array(z.string().url().refine(isOwnImageUrl, { message: "Upload the photo first." })).max(6).optional(),
     proposedPrice: z.number().int().positive().optional(),
+    priceMin: z.number().int().positive().optional(),
+    priceMax: z.number().int().positive().optional(),
     durationDays: z.number().int().min(1).max(MAX_DURATION_DAYS).default(1),
     startDate: z
       .string()
@@ -209,41 +214,74 @@ export async function jobRoutes(app: FastifyInstance) {
     return reply.code(201).send(toMessage(message));
   });
 
+  /** Shows what a spoken review said before it is submitted. Only Gemini can read audio, so nothing is made up. */
+  app.post("/jobs/:id/reviews/draft", { ...auth, config: aiLimit }, async (req): Promise<ReviewDraft> => {
+    const { job, direction } = await openReview(req);
+    const body = await readBody(req);
+    if (!body.audio) throw badRequest("INPUT_REQUIRED", "Send a voice note.");
+    // Checked first, so a file that is not audio never costs a model call.
+    assertAudioFile(body.audio.data, body.audio.mimetype);
+    const key = readingKey(job.id, direction, body.audio.data);
+    let reading: ReviewReading | null = recallReading(key);
+    if (!reading) {
+      try {
+        reading = await summariseReview(body.audio, direction, jobFacts(job));
+      } catch (err) {
+        if (!(err instanceof GeminiUnavailable)) throw err;
+        throw aiUnavailable("The voice review could not be processed. Please tap a rating.");
+      }
+      rememberReading(key, reading);
+    }
+    return { transcript: reading.transcript, tags: reading.tags, rating: reading.rating, source: "gemini" };
+  });
+
   app.post("/jobs/:id/reviews", { ...auth, config: aiLimit }, async (req, reply) => {
     const ctx = authOf(req);
-    const { id } = Id.parse(req.params);
-    const job = await prisma.job.findUnique({ where: { id }, include: jobInclude });
-    if (!job) throw notFound("Job");
-    const side = requireParty(ctx, job);
-    if (side === "member") throw forbidden("Only the crew leader can review the customer.");
-    if (job.status !== "completed") throw conflict("INVALID_JOB_STATE", "Reviews open once the job is complete.");
-
-    const direction = side === "customer" ? ("customer_to_worker" as const) : ("worker_to_customer" as const);
+    const { job, id, direction } = await openReview(req);
     const body = await readBody(req);
     const Fields = z.object({
       rating: z.coerce.number().int().min(1).max(5).optional(),
       tags: z.string().optional(),
+      paidOnTime: z.enum(["true", "false"]).optional(),
+      paidExtra: z.enum(["true", "false"]).optional(),
+      behaviour: z.enum(["good", "okay", "bad"]).optional(),
     });
     const fields = Fields.parse(body.fields);
-    const tapped = parseTags(fields.tags);
-    if (!body.audio && fields.rating === undefined) throw badRequest("RATING_REQUIRED", "Tap a rating or record a review.");
+    const aboutHirer = direction === "worker_to_customer";
+    const answers = aboutHirer
+      ? {
+          paidOnTime: fields.paidOnTime === undefined ? undefined : fields.paidOnTime === "true",
+          paidExtra: fields.paidExtra === undefined ? undefined : fields.paidExtra === "true",
+          behaviour: fields.behaviour,
+        }
+      : {};
+    const tapped = [...parseTags(fields.tags), ...hirerTagsFrom(answers)];
+    const tappedRating = fields.rating ?? (answers.behaviour ? BEHAVIOUR_RATING[answers.behaviour] : undefined);
+    if (!body.audio && tappedRating === undefined) throw badRequest("RATING_REQUIRED", "Tap a rating or record a review.");
     // Checked first, so a file that is not audio never costs a model call.
     if (body.audio) assertAudioFile(body.audio.data, body.audio.mimetype);
 
     let transcript: string | null = null;
     let aiTags: string[] = [];
-    let rating = fields.rating;
+    let rating = tappedRating;
     let aiAvailable = true;
 
     if (body.audio) {
-      try {
-        const summary = await summariseReview(body.audio, direction, jobFacts(job));
-        transcript = summary.transcript;
-        aiTags = summary.tags;
-        rating ??= summary.rating ?? undefined;
-      } catch (err) {
-        if (!(err instanceof GeminiUnavailable)) throw err;
-        aiAvailable = false;
+      const seen = recallReading(readingKey(id, direction, body.audio.data));
+      if (seen) {
+        // The reviewer has already seen these and chosen, so only the tags they sent back count.
+        transcript = seen.transcript;
+        rating ??= seen.rating ?? undefined;
+      } else {
+        try {
+          const summary = await summariseReview(body.audio, direction, jobFacts(job));
+          transcript = summary.transcript;
+          aiTags = summary.tags;
+          rating ??= summary.rating ?? undefined;
+        } catch (err) {
+          if (!(err instanceof GeminiUnavailable)) throw err;
+          aiAvailable = false;
+        }
       }
       // A voice-only review with no AI has no rating to record, so ask for a tap instead of inventing one.
       if (rating === undefined) throw aiUnavailable("The voice review could not be processed. Please tap a rating.");
@@ -286,6 +324,18 @@ export async function jobRoutes(app: FastifyInstance) {
       throw err;
     }
   });
+}
+
+/** Who may review this job now, and which way the review points. */
+async function openReview(req: FastifyRequest) {
+  const { id } = Id.parse(req.params);
+  const job = await prisma.job.findUnique({ where: { id }, include: jobInclude });
+  if (!job) throw notFound("Job");
+  const side = requireParty(authOf(req), job);
+  if (side === "member") throw forbidden("Only the crew leader can review the customer.");
+  if (job.status !== "completed") throw conflict("INVALID_JOB_STATE", "Reviews open once the job is complete.");
+  const direction = side === "customer" ? ("customer_to_worker" as const) : ("worker_to_customer" as const);
+  return { job, id, direction };
 }
 
 function parseTags(raw: string | undefined): string[] {

@@ -15,10 +15,10 @@ import {
 import { env } from "../env";
 import { aiUnavailable, badRequest, forbidden, notFound, unprocessable } from "../errors";
 import { GeminiUnavailable, readCnic, skillsFromPhoto } from "../gemini";
-import { startOfDayPkt, startOfWeekPkt } from "../geo";
+import { addDaysIso, startOfDayPkt, startOfWeekPkt, todayPkt } from "../geo";
 import { getActiveCategories, jev } from "../jev";
-import { toEarning, toReview, workerCard } from "../serialize";
-import { imageForAi, isOwnImageUrl, readBody, saveImage } from "../uploads";
+import { reviewInclude, toEarning, toPastWork, toReviewView, workerCard } from "../serialize";
+import { documentForAi, isOwnImageUrl, readBody, saveImage } from "../uploads";
 
 const aiLimit = { rateLimit: { max: env.RATE_LIMIT_AI_PER_MIN, timeWindow: "1 minute" } };
 
@@ -50,6 +50,7 @@ const SearchQuery = z.object({
   radiusKm: num.positive().max(100).optional(),
   categoryId: z.string().optional(),
   q: z.string().max(300).optional(),
+  minRating: num.min(0).max(5).optional(),
 });
 
 /** Agents act on workers they registered via ?forWorkerId=. Everyone else acts on themselves. */
@@ -99,6 +100,7 @@ export async function workerRoutes(app: FastifyInstance) {
 
     const urls: string[] = [];
     const found: string[] = [];
+    const labels: Record<string, string> = {};
     let aiAvailable = true;
     for (const image of body.images.slice(0, 6)) {
       const saved = await saveImage(image.data);
@@ -107,6 +109,8 @@ export async function workerRoutes(app: FastifyInstance) {
       try {
         const result = await skillsFromPhoto({ data: saved.jpeg, mimetype: "image/jpeg" }, categories);
         found.push(...result.skills);
+        const [label] = jev.normalizeSkills(result.skills, worker.categoryIds);
+        if (label) labels[saved.url] = label;
       } catch (err) {
         if (!(err instanceof GeminiUnavailable)) throw err;
         aiAvailable = false;
@@ -117,12 +121,15 @@ export async function workerRoutes(app: FastifyInstance) {
     const skills = [...new Set([...worker.skills, ...skillTags])];
     await prisma.workerProfile.update({
       where: { id: workerId },
-      data: kind === "profile" ? { photoUrl: urls[0] as string } : { photos: { push: urls }, skills },
+      data:
+        kind === "profile"
+          ? { photoUrl: urls[0] as string }
+          : { photos: { push: urls }, skills, photoSkills: { ...(worker.photoSkills as Record<string, string>), ...labels } },
     });
     return { urls, skillTags, aiAvailable: kind === "work" ? aiAvailable : null, worker: await workerCard(workerId) };
   });
 
-  /** Accepts a photo (read by Gemini) or a typed number. Neither the photo nor the number is stored. */
+  /** Accepts a photo or a PDF scan (read by the AI) or a typed number. Only the salted hash is stored. */
   app.post("/workers/me/cnic", { preHandler: requireAuth, config: aiLimit }, async (req) => {
     const workerId = await targetWorkerId(req);
     const body = await readBody(req);
@@ -135,7 +142,7 @@ export async function workerRoutes(app: FastifyInstance) {
       const image = body.images[0];
       if (!image) throw badRequest("CNIC_REQUIRED", "Attach a CNIC photo or type the number.");
       try {
-        const read = await readCnic(await imageForAi(image.data));
+        const read = await readCnic(await documentForAi(image.data));
         digits = read.cnic ? cleanCnic(read.cnic) : null;
       } catch (err) {
         if (!(err instanceof GeminiUnavailable)) throw err;
@@ -160,18 +167,32 @@ export async function workerRoutes(app: FastifyInstance) {
     const dayStart = startOfDayPkt(now);
     const weekStart = startOfWeekPkt(now);
     const sumSince = (from: Date) => rows.filter((r) => r.earnedAt >= from).reduce((s, r) => s + r.amount, 0);
-    return { items: rows.map(toEarning), today: sumSince(dayStart), week: sumSince(weekStart) };
+    const paidJobs = await prisma.earning.findMany({
+      where: { workerId: auth.worker.id },
+      distinct: ["jobId"],
+      select: { jobId: true },
+    });
+    const today = todayPkt(now);
+    const daily = [6, 5, 4, 3, 2, 1, 0].map((back) => {
+      const date = addDaysIso(today, -back);
+      return { date, amount: rows.filter((r) => todayPkt(r.earnedAt) === date).reduce((s, r) => s + r.amount, 0) };
+    });
+    return { items: rows.map(toEarning), today: sumSince(dayStart), week: sumSince(weekStart), jobCount: paidJobs.length, daily };
   });
 
   app.get("/workers/:id", async (req) => {
     const { id } = z.object({ id: z.string() }).parse(req.params);
     const card = await workerCard(id);
     if (!card) throw notFound("Worker");
-    const reviews = await prisma.review.findMany({
-      where: { direction: "customer_to_worker", job: { assignments: { some: { workerId: id } } } },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-    });
-    return { ...card, reviews: reviews.map(toReview) };
+    const [reviews, profile] = await Promise.all([
+      prisma.review.findMany({
+        where: { direction: "customer_to_worker", job: { assignments: { some: { workerId: id } } } },
+        include: reviewInclude,
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }),
+      prisma.workerProfile.findUniqueOrThrow({ where: { id }, select: { photos: true, photoSkills: true } }),
+    ]);
+    return { ...card, reviews: reviews.map(toReviewView), pastWork: toPastWork(profile) };
   });
 }

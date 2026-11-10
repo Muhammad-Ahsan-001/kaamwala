@@ -75,6 +75,15 @@ describe("hub", () => {
     expect(lasting.closed).toEqual([]);
   });
 
+  it("sends a heartbeat the browser can see", () => {
+    vi.useFakeTimers();
+    const socket = fakeSocket();
+    hub.add(asWs(socket), signedIn("w"));
+    hub.start();
+    vi.advanceTimersByTime(30_000);
+    expect(socket.sent).toEqual([JSON.stringify({ type: "heartbeat" })]);
+  });
+
   it("ignores a socket that closed while its token was being checked", () => {
     const gone = fakeSocket(3);
     hub.add(asWs(gone), signedIn("w"));

@@ -171,6 +171,8 @@ model WorkerProfile {
   offlineUntil     DateTime?
   photoUrl         String?
   photos           String[]
+  /// Past-work photo URL to the skill Gemini saw in it. A photo with no entry has no label.
+  photoSkills      Json         @default("{}")
   workingHours     String?
   approved         Boolean      @default(true)
   requestsReceived Int          @default(0)
@@ -198,6 +200,8 @@ model HirerProfile {
   area      String?
   lat       Float?
   lng       Float?
+  /// Shown to workers only once a booking is confirmed.
+  address   String?
   photoUrl  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -258,11 +262,15 @@ model Job {
   proposedById      String?
   agreedPrice       Int?
   totalPrice        Int?
+  /// The per-day estimate the customer was shown when they described the work.
+  estimateMin       Int?
+  estimateMax       Int?
   card              Json?
   customerConfirmed Boolean   @default(false)
   workerConfirmed   Boolean   @default(false)
   disputeReason     String?
   disputeResolution String?
+  disputedAt        DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   engagedAt         DateTime?

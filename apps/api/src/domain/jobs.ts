@@ -1,14 +1,15 @@
-import type { Job as JobDto } from "@kaamwala/contracts";
+import type { JobFeedItem, Job as JobDto } from "@kaamwala/contracts";
 import { Prisma, type Category } from "@prisma/client";
 import type { AuthContext } from "../auth";
 import { prisma, type Tx } from "../db";
 import { badRequest, conflict, forbidden, notFound, unprocessable } from "../errors";
 import { GeminiUnavailable, writeJobCard } from "../gemini";
-import { fromDateOnly, todayPkt, toDateOnly } from "../geo";
+import { distanceKm, fromDateOnly, todayPkt, toDateOnly } from "../geo";
 import { jev } from "../jev";
 import { pushToUsers } from "../push";
-import { jobInclude, offerInclude, toJob, toOffers, toOpenJobView, type JobFull } from "../serialize";
+import { jobInclude, offerInclude, oneDecimal, toJob, toOffers, toOpenJobView, type JobFull } from "../serialize";
 import { bookedTime, dayDates, jobFacts } from "./days";
+import { priceEstimate, type PriceEstimate } from "./estimate";
 import { openJobRecipients, withinOpenJobRadius, workerMatchesOpenJob } from "./openJobs";
 import { movePrice as nextPrice, splitEarnings, type PriceDirection } from "./pricing";
 import { assertAllAvailable, lockCrew, lockJob, lockWorkers, releaseWorkers, runTx, setStatus, type Effects } from "./tx";
@@ -84,6 +85,9 @@ export interface CreateJobInput {
   photoUrls?: string[] | undefined;
   /** Always per day. On a crew job, per day for the whole crew. */
   proposedPrice?: number | undefined;
+  /** The per-day estimate the customer was shown. */
+  priceMin?: number | undefined;
+  priceMax?: number | undefined;
   durationDays?: number | undefined;
   startDate?: string | undefined;
 }
@@ -104,6 +108,9 @@ export async function createJob(auth: AuthContext, input: CreateJobInput): Promi
     update: {},
   });
 
+  const estimateMin = input.priceMin === undefined ? null : Math.max(category.floorPrice, input.priceMin);
+  const estimateMax = input.priceMax === undefined ? null : Math.max(estimateMin ?? category.floorPrice, input.priceMax);
+
   const base = {
     mode: input.mode,
     customerId: auth.user.id,
@@ -117,6 +124,8 @@ export async function createJob(auth: AuthContext, input: CreateJobInput): Promi
     photoUrls: input.photoUrls ?? [],
     floor: category.floorPrice,
     step: category.step,
+    estimateMin,
+    estimateMax,
     durationDays: input.durationDays ?? 1,
     startDate: toDateOnly(input.startDate ?? todayPkt()),
   };
@@ -238,7 +247,7 @@ export async function listMine(auth: AuthContext): Promise<JobDto[]> {
   return jobs.map((job) => (sideOf(auth, job) ? toJob(job) : toOpenJobView(job)));
 }
 
-export async function listOpenFeed(auth: AuthContext): Promise<JobDto[]> {
+export async function listOpenFeed(auth: AuthContext): Promise<JobFeedItem[]> {
   const worker = auth.worker;
   if (!worker) throw forbidden("Finish worker sign-up first.");
   if (!worker.approved) return [];
@@ -258,7 +267,25 @@ export async function listOpenFeed(auth: AuthContext): Promise<JobDto[]> {
     orderBy: { createdAt: "desc" },
     take: 100,
   });
-  return jobs.filter((j) => withinOpenJobRadius(j, worker)).map(toOpenJobView);
+  const near = jobs.filter((j) => withinOpenJobRadius(j, worker));
+
+  // A job with no estimate of its own shows what workers in that trade really charge.
+  const unpriced = [...new Set(near.filter((j) => j.estimateMin === null).map((j) => j.categoryId))];
+  const estimates = new Map<string, PriceEstimate>(
+    await Promise.all(unpriced.map(async (id) => [id, await priceEstimate(id)] as const)),
+  );
+
+  return near.map((job) => {
+    const view = toOpenJobView(job);
+    const estimate = estimates.get(job.categoryId);
+    return {
+      ...view,
+      priceMin: job.estimateMin ?? estimate?.min ?? null,
+      priceMax: job.estimateMax ?? estimate?.max ?? null,
+      // Measured from the rounded location, so it reveals nothing the view does not already show.
+      distanceKm: oneDecimal(distanceKm(view.location, worker)),
+    };
+  });
 }
 
 export async function getJob(auth: AuthContext, id: string): Promise<JobDto> {
@@ -293,7 +320,8 @@ export async function listOffers(auth: AuthContext, jobId: string) {
     include: offerInclude,
     orderBy: { price: "asc" },
   });
-  return toOffers(offers);
+  // Distance is measured from the exact spot, which only the customer's side may work out.
+  return toOffers(offers, isCustomer ? { lat: job.lat, lng: job.lng } : undefined);
 }
 
 export async function createOffer(
@@ -395,6 +423,7 @@ export async function acceptOffer(auth: AuthContext, jobId: string, offerId: str
       include: jobInclude,
     });
     fx.job(jobId);
+    fx.jobClosed(jobId);
     fx.offer(offer.id, "offer.updated");
     fx.push(await workerUserIds(tx, workerIds), {
       title: "آپ کی پیشکش قبول ہو گئی",
@@ -748,6 +777,7 @@ async function cancelInTx(tx: Tx, fx: Effects, job: JobFull, except?: string): P
   await tx.jobDay.updateMany({ where: { jobId: job.id, status: "scheduled" }, data: { status: "skipped" } });
   const updated = await tx.job.update({ where: { id: job.id }, data: { status: "cancelled" }, include: jobInclude });
   fx.job(job.id);
+  if (job.status === "open") fx.jobClosed(job.id);
   return updated;
 }
 
@@ -788,6 +818,7 @@ export async function disputeJob(auth: AuthContext, jobId: string, reason: strin
       data: {
         status: "disputed",
         disputeReason: reason,
+        disputedAt: new Date(),
         // Only the days actually worked are owed, as on an early finish.
         ...(ongoing ? { totalPrice: (locked.agreedPrice as number) * countCompleted(locked) } : {}),
       },

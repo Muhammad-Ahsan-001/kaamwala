@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { stopVoice } from "./question-voices";
 
 export type RecorderStatus = "idle" | "recording" | "denied" | "unsupported";
 
@@ -38,6 +39,8 @@ export function useRecorder() {
   );
 
   const start = useCallback(async () => {
+    // A question still playing would end up in the answer.
+    stopVoice();
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       setStatus("unsupported");
       return false;

@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { CrewJob, CrewProfile } from "./screens/crew";
+import { CrewJob, CrewProfile, MyCrews } from "./screens/crew";
 import { Describe } from "./screens/Describe";
 import { Earnings } from "./screens/Earnings";
 import { Login, RoleChooser } from "./screens/entry";
@@ -14,6 +14,9 @@ import { OnboardType } from "./screens/signup/OnboardType";
 import { OnboardVoice } from "./screens/signup/OnboardVoice";
 import { AgentNew, CustomerConfirm, CustomerType, CustomerVoice } from "./screens/signup/other-signups";
 import { WorkerHome } from "./screens/WorkerHome";
+import { HistoryTrail } from "./lib/back";
+import { Guard, SignedOutOnly } from "./lib/session";
+import { PwaLayer, useSyncEpoch } from "./pwa/PwaLayer";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { ListSkeleton } from "./ui/primitives";
 
@@ -37,9 +40,12 @@ function ScrollToTop() {
 }
 
 export function App() {
+  const syncEpoch = useSyncEpoch();
   return (
     <DraftProvider>
       <ScrollToTop />
+      <HistoryTrail />
+      <PwaLayer />
       <ErrorBoundary>
         <Suspense
           fallback={
@@ -48,44 +54,66 @@ export function App() {
             </div>
           }
         >
-          <Routes>
+          <Routes key={syncEpoch}>
             <Route path="/" element={<Landing />} />
 
-            <Route path="/app" element={<RoleChooser />} />
+            <Route element={<SignedOutOnly />}>
+              <Route path="/app" element={<RoleChooser />} />
+            </Route>
             <Route path="/app/login" element={<Login />} />
+            <Route path="/admin/login" element={<Login door="admin" />} />
 
-            <Route path="/app/onboard" element={<OnboardVoice />} />
-            <Route path="/app/onboard/type" element={<OnboardType />} />
-            <Route path="/app/onboard/photos" element={<OnboardPhotos />} />
-            <Route path="/app/signup/customer" element={<CustomerVoice />} />
-            <Route path="/app/signup/customer/type" element={<CustomerType />} />
-            <Route path="/app/signup/customer/confirm" element={<CustomerConfirm />} />
-            <Route path="/app/agent/new" element={<AgentNew />} />
+            {/* Sign-up. The last step stays open, because finishing it creates the profile while still on it. */}
+            <Route element={<Guard roles={["worker", "agent"]} profile="none" />}>
+              <Route path="/app/onboard" element={<OnboardVoice />} />
+              <Route path="/app/onboard/type" element={<OnboardType />} />
+            </Route>
+            <Route element={<Guard roles={["worker", "agent"]} />}>
+              <Route path="/app/onboard/photos" element={<OnboardPhotos />} />
+            </Route>
+            <Route element={<Guard roles={["customer"]} profile="none" />}>
+              <Route path="/app/signup/customer" element={<CustomerVoice />} />
+              <Route path="/app/signup/customer/type" element={<CustomerType />} />
+            </Route>
+            <Route element={<Guard roles={["customer"]} />}>
+              <Route path="/app/signup/customer/confirm" element={<CustomerConfirm />} />
+            </Route>
+            <Route element={<Guard roles={["agent"]} />}>
+              <Route path="/app/agent/new" element={<AgentNew />} />
+            </Route>
 
-            <Route path="/app/worker" element={<WorkerHome />} />
-            <Route path="/app/describe" element={<Describe />} />
-            <Route path="/app/adda" element={<Adda />} />
-            <Route path="/app/workers/:id" element={<WorkerProfile />} />
-            <Route path="/app/hirers/:id" element={<HirerProfile />} />
+            <Route element={<Guard roles={["worker"]} profile="required" />}>
+              <Route path="/app/worker" element={<WorkerHome />} />
+              <Route path="/app/earnings" element={<Earnings />} />
+              <Route path="/app/crews" element={<MyCrews />} />
+            </Route>
 
-            <Route path="/app/jobs" element={<MyJobs />} />
-            <Route path="/app/jobs/:id" element={<JobChat />} />
-            <Route path="/app/jobs/:id/offers" element={<Offers />} />
-            <Route path="/app/jobs/:id/review" element={<VoiceReview />} />
+            <Route element={<Guard roles={["customer"]} profile="required" />}>
+              <Route path="/app/describe" element={<Describe />} />
+              <Route path="/app/adda" element={<Adda />} />
+              <Route path="/app/crew-job" element={<CrewJob />} />
+            </Route>
 
-            <Route path="/app/crews/:id" element={<CrewProfile />} />
-            <Route path="/app/crew-job" element={<CrewJob />} />
+            <Route element={<Guard />}>
+              <Route path="/app/workers/:id" element={<WorkerProfile />} />
+              <Route path="/app/hirers/:id" element={<HirerProfile />} />
+              <Route path="/app/jobs" element={<MyJobs />} />
+              <Route path="/app/jobs/:id" element={<JobChat />} />
+              <Route path="/app/jobs/:id/offers" element={<Offers />} />
+              <Route path="/app/jobs/:id/review" element={<VoiceReview />} />
+              <Route path="/app/crews/:id" element={<CrewProfile />} />
+              <Route path="/app/settings" element={<SettingsScreen />} />
+            </Route>
 
-            <Route path="/app/earnings" element={<Earnings />} />
-            <Route path="/app/settings" element={<SettingsScreen />} />
-
-            <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/admin/workers" element={<AdminWorkers />} />
-            <Route path="/admin/jobs" element={<AdminJobs />} />
-            <Route path="/admin/categories" element={<AdminCategories />} />
-            <Route path="/admin/agents" element={<AdminAgents />} />
-            <Route path="/admin/agents/:id" element={<AdminAgentLedger />} />
-            <Route path="/admin/disputes" element={<AdminDisputes />} />
+            <Route element={<Guard roles={["admin"]} />}>
+              <Route path="/admin" element={<AdminDashboard />} />
+              <Route path="/admin/workers" element={<AdminWorkers />} />
+              <Route path="/admin/jobs" element={<AdminJobs />} />
+              <Route path="/admin/categories" element={<AdminCategories />} />
+              <Route path="/admin/agents" element={<AdminAgents />} />
+              <Route path="/admin/agents/:id" element={<AdminAgentLedger />} />
+              <Route path="/admin/disputes" element={<AdminDisputes />} />
+            </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

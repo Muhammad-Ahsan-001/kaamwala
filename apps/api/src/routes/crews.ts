@@ -6,6 +6,7 @@ import { prisma } from "../db";
 import { lockCrew, runTx } from "../domain/tx";
 import { env } from "../env";
 import { conflict, forbidden, notFound, unprocessable } from "../errors";
+import { hub } from "../hub";
 import { getActiveCategories } from "../jev";
 import { perUserLimit } from "../limits";
 import { pushToUsers } from "../push";
@@ -37,6 +38,7 @@ async function oneCrew(id: string) {
 }
 
 function notifyInvited(userIds: string[], crew: { id: string; name: string }): void {
+  hub.toUsersOnly(userIds, { type: "crew.invited", crewId: crew.id });
   void pushToUsers(userIds, {
     title: "ٹیم میں شامل ہونے کی دعوت",
     body: crew.name,

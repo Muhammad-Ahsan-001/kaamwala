@@ -1,16 +1,28 @@
-import { useRef, useState, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
 
 /** Resting positions, as a share of the sheet's own height hidden below the fold. */
-const SNAPS = [0, 0.5, 0.78];
-export const SHEET_DEFAULT_VISIBLE = 0.93 * (1 - (SNAPS[1] ?? 0));
+const SNAPS = [0, 0.42, 0.78];
+const HALF = 1;
+const PEEK = 2;
+export const SHEET_DEFAULT_VISIBLE = 0.93 * (1 - (SNAPS[HALF] ?? 0));
 
-/** A bottom sheet you can drag between full, half and peek. The handle also works by tap and keyboard. */
-export function DragSheet({ header, children, label }: { header: ReactNode; children: ReactNode; label: string }) {
-  const [snap, setSnap] = useState(1);
+/**
+ * A bottom sheet you can drag between full, half and peek. The handle also works by tap and keyboard.
+ * When revealKey changes to a value, the sheet comes up from peek and scrolls back to the top.
+ */
+export function DragSheet({ header, children, label, revealKey }: { header: ReactNode; children: ReactNode; label: string; revealKey?: string | null }) {
+  const [snap, setSnap] = useState(HALF);
   const panel = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const drag = useRef<{ startY: number; startOffset: number; lastY: number; lastTime: number; velocity: number; moved: boolean } | null>(null);
 
   const offset = SNAPS[snap] ?? 0;
+
+  useEffect(() => {
+    if (!revealKey) return;
+    setSnap((value) => (value === PEEK ? HALF : value));
+    body.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [revealKey]);
 
   const onDown = (event: PointerEvent<HTMLDivElement>) => {
     const height = panel.current?.offsetHeight ?? 1;
@@ -60,7 +72,7 @@ export function DragSheet({ header, children, label }: { header: ReactNode; chil
         <button
           type="button"
           aria-label={label}
-          onClick={() => setSnap((value) => (value === 0 ? 1 : value === 1 ? 2 : 1))}
+          onClick={() => setSnap((value) => (value === 0 ? HALF : value === HALF ? PEEK : HALF))}
           onKeyDown={(event) => {
             if (event.key === "ArrowUp") setSnap((value) => Math.max(0, value - 1));
             if (event.key === "ArrowDown") setSnap((value) => Math.min(SNAPS.length - 1, value + 1));
@@ -71,7 +83,7 @@ export function DragSheet({ header, children, label }: { header: ReactNode; chil
         </button>
       </div>
       <div className="shrink-0">{header}</div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-2" style={{ paddingBottom: `calc(${offset} * 93dvh + 1.5rem)` }}>
+      <div ref={body} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pt-2" style={{ paddingBottom: `calc(${offset} * 93dvh + 1.5rem)` }}>
         {children}
       </div>
     </div>

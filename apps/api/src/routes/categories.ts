@@ -4,7 +4,7 @@ import { requireRole, verifyToken } from "../auth";
 import { prisma } from "../db";
 import { forbidden, notFound } from "../errors";
 import { hub } from "../hub";
-import { reloadCategories } from "../jev";
+import { getActiveCategories, jev, reloadCategories } from "../jev";
 import { toCategory } from "../serialize";
 
 const words = z.array(z.string().trim().min(1).max(80)).max(300);
@@ -58,6 +58,18 @@ export async function categoryRoutes(app: FastifyInstance) {
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     });
     return { items: rows.map(toCategory) };
+  });
+
+  /** Jev only, so it costs no model call and is safe to run as someone types. */
+  app.get("/categories/match", { config: { rateLimit: { max: 240, timeWindow: "1 minute" } } }, async (req) => {
+    const { q } = z.object({ q: z.string().trim().min(1).max(300) }).parse(req.query);
+    const best = jev.match(q).best;
+    const category = best ? getActiveCategories().find((c) => c.id === best.categoryId) : undefined;
+    return {
+      category: category ? toCategory(category) : null,
+      confidence: category && best ? best.confidence : 0,
+      skills: category && best ? best.skills.map((s) => s.skill) : [],
+    };
   });
 
   const admin = { preHandler: requireRole("admin") };

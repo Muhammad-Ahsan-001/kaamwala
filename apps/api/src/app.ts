@@ -87,7 +87,11 @@ export async function buildApp(): Promise<FastifyInstance> {
     }
     const status = (err as FastifyError).statusCode;
     if (typeof status === "number" && status < 500) {
-      const code = status === 429 ? "RATE_LIMITED" : ((err as FastifyError).code ?? "REQUEST_ERROR");
+      const raw = (err as FastifyError).code;
+      if (raw === "FST_REQ_FILE_TOO_LARGE") {
+        return reply.code(413).send({ error: { code: "FILE_TOO_LARGE", message: "This file is too large. Please choose one under 12 MB." } });
+      }
+      const code = status === 429 ? "RATE_LIMITED" : (raw ?? "REQUEST_ERROR");
       return reply.code(status).send({ error: { code, message: err.message } });
     }
     req.log.error(err);

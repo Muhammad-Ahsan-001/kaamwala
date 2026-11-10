@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { toDateOnly } from "../geo";
-import { averageResponseMinutes, onTimeRate, wasOnTime } from "./trust";
+import { HIRER_TAG, averageResponseMinutes, hirerPaymentStats, hirerTagsFrom, onTimeRate, wasOnTime } from "./trust";
 
 const at = (hour: number, minute = 0) => new Date(Date.UTC(2026, 10, 1, hour, minute));
 const oneDay = { startDate: toDateOnly("2026-11-01"), durationDays: 1 };
@@ -80,3 +80,26 @@ describe("averageResponseMinutes", () => {
     ).toBe(7.5);
   });
 });
+
+describe("hirer answers", () => {
+  it("become the tags Gemini is prompted with", () => {
+    expect(hirerTagsFrom({ paidOnTime: true, paidExtra: true, behaviour: "good" })).toEqual([HIRER_TAG.paidOnTime, HIRER_TAG.paidExtra, HIRER_TAG.goodBehaviour]);
+    expect(hirerTagsFrom({ paidOnTime: false, paidExtra: false, behaviour: "okay" })).toEqual([HIRER_TAG.paidLate]);
+    expect(hirerTagsFrom({})).toEqual([]);
+  });
+
+  it("are counted only when someone said either way", () => {
+    expect(hirerPaymentStats([])).toEqual({ paidOnTimePct: null, paidExtraCount: 0 });
+    expect(hirerPaymentStats([[HIRER_TAG.goodBehaviour]])).toEqual({ paidOnTimePct: null, paidExtraCount: 0 });
+  });
+
+  it("give a percentage of those who answered", () => {
+    const stats = hirerPaymentStats([[HIRER_TAG.paidOnTime, HIRER_TAG.paidExtra], [HIRER_TAG.paidOnTime], [HIRER_TAG.paidLate], [HIRER_TAG.goodBehaviour]]);
+    expect(stats).toEqual({ paidOnTimePct: 67, paidExtraCount: 1 });
+  });
+
+  it("match a tag whatever its capitals or spacing", () => {
+    expect(hirerPaymentStats([["Waqt  Par Adaigi"]]).paidOnTimePct).toBe(100);
+  });
+});
+

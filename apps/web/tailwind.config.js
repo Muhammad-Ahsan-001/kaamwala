@@ -8,16 +8,17 @@ export default {
   theme: {
     // Sizes carry no line-height: Nastaliq needs far more room than Latin,
     // so line-height is set once per script.
+    // --type is the one dial for all text. rem itself stays put, so spacing and 48px tap targets do not shrink with it.
     fontSize: {
-      xs: "0.75rem",
-      sm: "0.875rem",
-      base: "1rem",
-      lg: "1.125rem",
-      xl: "1.25rem",
-      "2xl": "1.5rem",
-      "3xl": "1.875rem",
-      "4xl": "2.25rem",
-      "5xl": "3rem",
+      xs: "calc(0.75rem * var(--type, 1))",
+      sm: "calc(0.875rem * var(--type, 1))",
+      base: "calc(1rem * var(--type, 1))",
+      lg: "calc(1.125rem * var(--type, 1))",
+      xl: "calc(1.25rem * var(--type, 1))",
+      "2xl": "calc(1.5rem * var(--type, 1))",
+      "3xl": "calc(1.875rem * var(--type, 1))",
+      "4xl": "calc(2.25rem * var(--type, 1))",
+      "5xl": "calc(3rem * var(--type, 1))",
     },
     extend: {
       colors: {

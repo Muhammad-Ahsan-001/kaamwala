@@ -104,6 +104,16 @@ export function Auto({ text, className }: { text: string; className?: string }) 
   );
 }
 
+/** One line of text that is cut at its own end. Without this a Latin name on an Urdu screen loses its first letters. */
+export function OneLine({ text, className }: { text: string; className?: string }) {
+  const latin = isLatin(text);
+  return (
+    <span dir={latin ? "ltr" : "rtl"} className={cx("block truncate rtl:text-right", latin ? "latin" : "ur", className)}>
+      {text}
+    </span>
+  );
+}
+
 export function Chip({
   active,
   icon: Icon,
@@ -190,19 +200,25 @@ export function Field({
   hint,
   error,
   htmlFor,
+  action,
   children,
 }: {
   label: string;
   hint?: string;
   error?: string;
   htmlFor?: string;
+  /** Sits at the end of the label line, outside the label so tapping it does not focus the input. */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div>
-      <label htmlFor={htmlFor} className="mb-1 block text-base font-bold text-ink">
-        {label}
-      </label>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <label htmlFor={htmlFor} className="block min-w-0 text-base font-bold text-ink">
+          {label}
+        </label>
+        {action}
+      </div>
       {children}
       {hint && !error && <p className="mt-1 text-sm text-soft">{hint}</p>}
       {error && (

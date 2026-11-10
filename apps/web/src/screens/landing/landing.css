@@ -1,0 +1,221 @@
+/* The main website only: type, ornament and motion that utilities do not cover. */
+
+.lp-root {
+  background:
+    radial-gradient(70rem 34rem at 50% -12rem, rgb(var(--amber-100)) 0%, transparent 72%),
+    rgb(var(--page));
+  font-size: 0.875rem;
+  overflow-x: clip;
+  text-wrap: pretty;
+}
+
+html[lang="ur"] .lp-root {
+  /* Nastaliq still needs room, but less than the app's reading screens. */
+  line-height: 1.95;
+}
+
+@media (min-width: 1024px) {
+  .lp-root {
+    font-size: 0.9375rem;
+  }
+}
+
+.lp-h1 {
+  font-size: clamp(1.625rem, 1.1rem + 2vw, 2.75rem);
+  font-weight: 800;
+  line-height: 1.14;
+  text-wrap: balance;
+}
+
+html[lang="ur"] .lp-h1 {
+  font-size: clamp(1.5rem, 1.05rem + 1.35vw, 2.25rem);
+  font-weight: 700;
+  line-height: 1.95;
+}
+
+.lp-h2 {
+  font-size: clamp(1.125rem, 1rem + 0.55vw, 1.5rem);
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+html[lang="ur"] .lp-h2 {
+  font-size: clamp(1.0625rem, 0.95rem + 0.5vw, 1.375rem);
+  font-weight: 700;
+  line-height: 1.95;
+}
+
+.lp-mark {
+  color: rgb(var(--brand-600));
+}
+
+/* The painted border strip from the sides of a Pakistani truck. */
+.lp-patti {
+  height: 9px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='9'%3E%3Cpath d='M0 0h11L5.5 9z' fill='%23F2A71B'/%3E%3Cpath d='M11 0h11l-5.5 9z' fill='%23137A57'/%3E%3Cpath d='M22 0h11l-5.5 9z' fill='%23965E04'/%3E%3Cpath d='M33 0h11l-5.5 9z' fill='%23137A57'/%3E%3C/svg%3E");
+  background-size: 44px 9px;
+  background-repeat: repeat-x;
+  background-position: center top;
+}
+
+/* A carved window screen, faint behind the worker panel. */
+.lp-jaali {
+  background-color: rgb(var(--brand-600));
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56' fill='none' stroke='%23fff' stroke-opacity='.13' stroke-width='1.4'%3E%3Cpath d='M28 4l24 24-24 24L4 28z'/%3E%3Cpath d='M11 11h34v34H11z'/%3E%3Cpath d='M0 0l11 11M56 0L45 11M0 56l11-11M56 56L45 45'/%3E%3C/svg%3E");
+  background-size: 56px 56px;
+}
+
+.lp-glow {
+  background: radial-gradient(closest-side, rgb(var(--amber-100)) 0%, rgb(var(--amber-100) / 0) 100%);
+}
+
+.lp-tile {
+  transition:
+    transform 0.18s ease-out,
+    border-color 0.18s ease-out,
+    box-shadow 0.18s ease-out;
+}
+
+@media (hover: hover) {
+  .lp-tile:hover {
+    transform: translateY(-3px);
+    border-color: rgb(var(--brand-200));
+    box-shadow: 0 10px 28px rgb(60 50 30 / 0.1);
+  }
+}
+
+.lp-tile:active {
+  transform: scale(0.97);
+}
+
+/* Only transform and opacity move, so a cheap phone keeps up. */
+@keyframes lp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lp-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes lp-float {
+  from {
+    transform: translateY(-5px);
+  }
+  to {
+    transform: translateY(5px);
+  }
+}
+
+@keyframes lp-bob {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-7px);
+  }
+}
+
+@keyframes lp-ring {
+  0% {
+    opacity: 0.55;
+    transform: scale(0.5);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.3);
+  }
+}
+
+@keyframes lp-glow-sun {
+  from {
+    opacity: 0.16;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 0.3;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes lp-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.lp-rise {
+  animation: lp-rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  animation-delay: var(--d, 0ms);
+}
+
+.lp-pop {
+  animation: lp-pop 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  animation-delay: var(--d, 0ms);
+}
+
+.lp-float {
+  animation: lp-float 3.4s ease-in-out infinite alternate;
+  animation-delay: var(--d, 0ms);
+}
+
+.lp-pin {
+  animation: lp-bob 2.1s ease-in-out infinite alternate;
+  animation-delay: var(--d, 0ms);
+}
+
+.lp-ring {
+  animation: lp-ring 2.6s ease-out infinite;
+  animation-delay: var(--d, 0ms);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.lp-sun {
+  animation: lp-glow-sun 3.6s ease-in-out infinite alternate;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.lp-bar {
+  animation: lp-bar 0.95s ease-in-out infinite;
+  animation-delay: var(--d, 0ms);
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-rise,
+  .lp-pop,
+  .lp-float,
+  .lp-pin,
+  .lp-ring,
+  .lp-sun,
+  .lp-bar {
+    animation: none !important;
+  }
+
+  .lp-tile {
+    transition: none;
+  }
+}

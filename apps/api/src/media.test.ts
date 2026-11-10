@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUDIO_FILE_NAME, audioBytesMatch, audioFileName, audioSignatureValid, isAudioPath, isHeic, signAudio } from "./media";
+import { AUDIO_FILE_NAME, audioBytesMatch, audioFileName, audioSignatureValid, isAudioPath, isHeic, isPdf, signAudio } from "./media";
 
 const bytes = (...values: number[]) => Buffer.from(values);
 const text = (s: string) => Buffer.from(s, "latin1");
@@ -29,6 +29,14 @@ describe("audioBytesMatch", () => {
     ["audio/webm", Buffer.alloc(0)],
   ])("refuses %s when the bytes are something else", (mime, data) => {
     expect(audioBytesMatch(data, mime)).toBe(false);
+  });
+});
+
+describe("isPdf", () => {
+  it("goes by the bytes and not the name", () => {
+    expect(isPdf(text("%PDF-1.7\n"))).toBe(true);
+    expect(isPdf(text("this is not a pdf"))).toBe(false);
+    expect(isPdf(text(""))).toBe(false);
   });
 });
 
