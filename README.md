@@ -104,7 +104,7 @@ Jev takes raw text in Urdu script, Roman Urdu or English, and returns the best t
 
 ## AI services used
 
-All AI features use the **Google Gemini API** through the `@google/genai` SDK. The model is set by the `GEMINI_MODEL` environment variable, and `apps/api/.env.example` sets it to `gemini-2.5-flash`.
+All AI features use the **Google Gemini API** through the `@google/genai` SDK. The model is set by the `GEMINI_MODEL` environment variable, which defaults to `gemini-3.5-flash`. If it is overloaded or unavailable, the API falls back through `GEMINI_FALLBACK_MODELS` (`gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`).
 
 | Feature | What Gemini does |
 |---|---|

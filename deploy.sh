@@ -142,9 +142,6 @@ VITE_API_URL="https://${API_HOST}" VITE_WS_URL="wss://${API_HOST}" \
 pnpm --filter @kaamwala/api build
 
 if [[ "$RUN_SEED" -eq 1 ]]; then
-  pnpm --filter @kaamwala/api exec tsup prisma/seed.ts \
-    --format esm --target node24 --out-dir dist/seed \
-    --noExternal @kaamwala/contracts --noExternal @kaamwala/jev
   [[ -f apps/api/dist/seed/seed.js ]] || die "Seed bundle was not produced."
 fi
 

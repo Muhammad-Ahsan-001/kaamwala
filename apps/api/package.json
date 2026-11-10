@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch --env-file=.env src/server.ts",
-    "build": "tsup src/server.ts --format esm --target node24 --out-dir dist --noExternal @kaamwala/contracts --noExternal @kaamwala/jev",
+    "build": "prisma generate && tsup",
     "start": "node dist/server.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "e2e": "tsx --env-file=.env scripts/e2e.ts",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx --env-file=.env prisma/seed.ts",

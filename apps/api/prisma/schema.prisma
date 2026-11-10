@@ -1,0 +1,390 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  worker
+  customer
+  admin
+  agent
+}
+
+enum WorkerStatus {
+  offline
+  available
+  requested
+  engaged
+  completed
+}
+
+enum JobMode {
+  direct
+  open
+  crew
+}
+
+enum JobStatus {
+  open
+  requested
+  negotiating
+  pending_confirmation
+  engaged
+  completed
+  cancelled
+  disputed
+}
+
+enum Urgency {
+  low
+  normal
+  urgent
+}
+
+enum OfferStatus {
+  pending
+  accepted
+  rejected
+  withdrawn
+}
+
+enum ReviewDirection {
+  customer_to_worker
+  worker_to_customer
+}
+
+enum JobDayStatus {
+  scheduled
+  completed
+  skipped
+}
+
+/// Payment collection is mocked. No real money moves, and this is the only status.
+enum AgentPaymentStatus {
+  mock_collected
+}
+
+model User {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  name      String?
+  role      Role     @default(customer)
+  suspended Boolean  @default(false)
+  /// Set when this phone first completes an OTP sign-in. OTP delivery itself is mocked.
+  phoneVerifiedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workerProfile       WorkerProfile?
+  hirerProfile        HirerProfile?
+  jobsAsCustomer      Job[]              @relation("JobCustomer")
+  messages            Message[]
+  reviewsWritten      Review[]           @relation("Reviewer")
+  reviewsReceived     Review[]           @relation("Reviewee")
+  pushSubscriptions   PushSubscription[]
+  agentCreatedWorkers WorkerProfile[]    @relation("AgentCreated")
+  agentLedgerEntries  AgentLedgerEntry[]
+}
+
+/// One row only, id = 1. A check constraint in the migration enforces it.
+model AppSettings {
+  id                Int      @id @default(1)
+  agentSignupFee    Int      @default(200)
+  agentSharePercent Int      @default(40)
+  updatedAt         DateTime @updatedAt
+}
+
+/// Amounts are copied at sign-up, so later settings changes never alter a past entry.
+model AgentLedgerEntry {
+  id            String             @id @default(cuid())
+  agentId       String
+  agent         User               @relation(fields: [agentId], references: [id])
+  workerId      String             @unique
+  worker        WorkerProfile      @relation(fields: [workerId], references: [id])
+  fee           Int
+  agentShare    Int
+  platformShare Int
+  paymentStatus AgentPaymentStatus @default(mock_collected)
+  seeded        Boolean            @default(false)
+  createdAt     DateTime           @default(now())
+
+  @@index([agentId, createdAt])
+  @@index([createdAt])
+}
+
+/// OTP delivery is mocked: the code is returned to the client and disclosed in the README.
+model OtpChallenge {
+  id         String    @id @default(cuid())
+  phone      String
+  code       String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model Category {
+  id           String   @id @default(cuid())
+  nameUr       String
+  nameRoman    String
+  nameEn       String
+  icon         String
+  keywords     String[]
+  skills       String[]
+  skillAliases Json     @default("{}")
+  floorPrice   Int
+  step         Int      @default(50)
+  crewAllowed  Boolean  @default(false)
+  active       Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  jobs Job[]
+
+  @@index([active, sortOrder])
+}
+
+model WorkerProfile {
+  id               String       @id @default(cuid())
+  userId           String       @unique
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryIds      String[]
+  skills           String[]
+  years            Int          @default(0)
+  rate             Int          @default(0)
+  area             String
+  lat              Float
+  lng              Float
+  status           WorkerStatus @default(available)
+  statusChangedAt  DateTime     @default(now())
+  offlineUntil     DateTime?
+  photoUrl         String?
+  photos           String[]
+  workingHours     String?
+  approved         Boolean      @default(true)
+  requestsReceived Int          @default(0)
+  requestsAnswered Int          @default(0)
+  createdByAgentId String?
+  createdByAgent   User?        @relation("AgentCreated", fields: [createdByAgentId], references: [id])
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  crewsLed    Crew[]
+  memberships CrewMember[]
+  assignments JobAssignment[]
+  offers      Offer[]
+  earnings    Earning[]
+  cnicHash    CnicHash?
+  ledgerEntry AgentLedgerEntry?
+
+  @@index([status, approved])
+}
+
+model HirerProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  area      String?
+  lat       Float?
+  lng       Float?
+  photoUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Crew {
+  id          String        @id @default(cuid())
+  name        String
+  leaderId    String
+  leader      WorkerProfile @relation(fields: [leaderId], references: [id])
+  categoryIds String[]
+  rate        Int
+  createdAt   DateTime      @default(now())
+
+  members CrewMember[]
+  jobs    Job[]
+  offers  Offer[]
+}
+
+model CrewMember {
+  id       String        @id @default(cuid())
+  crewId   String
+  crew     Crew          @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  workerId String
+  worker   WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([crewId, workerId])
+  @@index([workerId])
+}
+
+model Job {
+  id                String    @id @default(cuid())
+  mode              JobMode
+  status            JobStatus
+  customerId        String
+  customer          User      @relation("JobCustomer", fields: [customerId], references: [id])
+  categoryId        String
+  category          Category  @relation(fields: [categoryId], references: [id])
+  crewId            String?
+  crew              Crew?     @relation(fields: [crewId], references: [id])
+  description       String
+  urgency           Urgency   @default(normal)
+  area              String
+  lat               Float
+  lng               Float
+  scheduledFor      DateTime?
+  photoUrls         String[]
+  floor             Int
+  step              Int
+  /// Number of working days. Prices below are always per day, for the whole crew on a crew job.
+  durationDays      Int       @default(1)
+  startDate         DateTime  @default(now()) @db.Date
+  proposedPrice     Int?
+  proposedById      String?
+  agreedPrice       Int?
+  totalPrice        Int?
+  card              Json?
+  customerConfirmed Boolean   @default(false)
+  workerConfirmed   Boolean   @default(false)
+  disputeReason     String?
+  disputeResolution String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  engagedAt         DateTime?
+  completedAt       DateTime?
+
+  assignments JobAssignment[]
+  offers      Offer[]
+  messages    Message[]
+  reviews     Review[]
+  earnings    Earning[]
+  days        JobDay[]
+
+  @@index([status, categoryId])
+  @@index([customerId])
+}
+
+/// One row per working day, created in the same transaction that confirms the booking.
+model JobDay {
+  id          String       @id @default(cuid())
+  jobId       String
+  job         Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  dayNumber   Int
+  date        DateTime     @db.Date
+  status      JobDayStatus @default(scheduled)
+  completedAt DateTime?
+
+  @@unique([jobId, dayNumber])
+}
+
+/// Which workers a job holds. The migration adds a partial unique index on workerId
+/// WHERE active, so the database itself refuses a second active job for any worker.
+model JobAssignment {
+  id        String        @id @default(cuid())
+  jobId     String
+  job       Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  workerId  String
+  worker    WorkerProfile @relation(fields: [workerId], references: [id])
+  active    Boolean       @default(true)
+  /// When the worker accepted or declined a direct or crew request.
+  respondedAt DateTime?
+  createdAt DateTime      @default(now())
+
+  @@unique([jobId, workerId])
+  @@index([workerId])
+}
+
+model Offer {
+  id         String        @id @default(cuid())
+  jobId      String
+  job        Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  workerId   String
+  worker     WorkerProfile @relation(fields: [workerId], references: [id])
+  crewId     String?
+  crew       Crew?         @relation(fields: [crewId], references: [id])
+  price      Int
+  etaMinutes Int?
+  status     OfferStatus   @default(pending)
+  acceptedAt DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@unique([jobId, workerId])
+}
+
+model Message {
+  id         String   @id @default(cuid())
+  jobId      String
+  job        Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  senderId   String
+  sender     User     @relation(fields: [senderId], references: [id])
+  audioUrl   String?
+  transcript String?
+  text       String?
+  /// What Jev recognised in the transcript or text.
+  detected   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([jobId, createdAt])
+}
+
+model Review {
+  id         String          @id @default(cuid())
+  jobId      String
+  job        Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  direction  ReviewDirection
+  reviewerId String
+  reviewer   User            @relation("Reviewer", fields: [reviewerId], references: [id])
+  revieweeId String
+  reviewee   User            @relation("Reviewee", fields: [revieweeId], references: [id])
+  rating     Int
+  audioUrl   String?
+  transcript String?
+  tags       String[]
+  createdAt  DateTime        @default(now())
+
+  @@unique([jobId, direction])
+  @@index([revieweeId])
+}
+
+model Earning {
+  id         String        @id @default(cuid())
+  workerId   String
+  worker     WorkerProfile @relation(fields: [workerId], references: [id])
+  jobId      String
+  job        Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  amount     Int
+  categoryId String
+  dayNumber  Int?
+  earnedAt   DateTime      @default(now())
+
+  @@unique([jobId, workerId, dayNumber])
+  @@index([workerId, earnedAt])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+/// Only a salted SHA-256 hash is stored. The CNIC number and photo are never kept.
+model CnicHash {
+  id        String        @id @default(cuid())
+  hash      String        @unique
+  workerId  String        @unique
+  worker    WorkerProfile @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now())
+}

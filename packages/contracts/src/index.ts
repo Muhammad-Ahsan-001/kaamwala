@@ -43,6 +43,8 @@ export const Category = z.object({
   icon: z.string(),
   keywords: z.array(z.string()),
   skills: z.array(z.string()),
+  /** Extra words that point at one skill, keyed by skill name. */
+  skillAliases: z.record(z.array(z.string())).optional(),
   floorPrice: z.number().int().nonnegative(),
   step: z.number().int().positive(),
   crewAllowed: z.boolean(),
@@ -61,6 +63,14 @@ export const TrustSummary = z.object({
   responseRate: z.number(), // 0 to 1
   tags: z.array(z.object({ tag: z.string(), count: z.number().int() })),
   jobTypes: z.array(z.object({ categoryId: z.string(), count: z.number().int() })),
+  /**
+   * "waqt par": 0 to 1, the share of completed jobs finished within 4 hours of the agreed time.
+   * 0 when the worker has no completed jobs, so hide it while jobCount is 0.
+   * The API always sends this; it is optional only so existing fixtures keep compiling.
+   */
+  onTimeRate: z.number().optional(),
+  /** "jawab": average minutes from a job being posted to this worker's reply. Null with no replies yet. */
+  avgResponseMinutes: z.number().nullable().optional(),
 });
 export type TrustSummary = z.infer<typeof TrustSummary>;
 
@@ -80,8 +90,75 @@ export const WorkerCard = z.object({
   approved: z.boolean(),
   trust: TrustSummary,
   distanceKm: z.number().optional(),
+  /** A CNIC hash is on file and is not a duplicate. This is NOT government or NADRA verification. */
+  cnicChecked: z.boolean().optional(),
+  /** This phone completed an OTP sign-in. OTP delivery is mocked. */
+  phoneChecked: z.boolean().optional(),
 });
 export type WorkerCard = z.infer<typeof WorkerCard>;
+
+/** Field-agent sign-up fee. Self-signup is free. Payment collection is mocked. */
+export const AppSettings = z.object({
+  agentSignupFee: z.number().int().nonnegative(),
+  agentSharePercent: z.number().int().min(0).max(100),
+});
+export type AppSettings = z.infer<typeof AppSettings>;
+
+export const AgentLedgerEntry = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  agentName: z.string(),
+  workerId: z.string(),
+  workerName: z.string(),
+  fee: z.number().int(),
+  agentShare: z.number().int(),
+  platformShare: z.number().int(),
+  paymentStatus: z.literal("mock_collected"),
+  createdAt: z.string(),
+});
+export type AgentLedgerEntry = z.infer<typeof AgentLedgerEntry>;
+
+export const AgentLedgerSummary = z.object({
+  agentId: z.string(),
+  agentName: z.string(),
+  phone: z.string(),
+  signups: z.number().int(),
+  totalFee: z.number().int(),
+  agentShare: z.number().int(),
+  platformShare: z.number().int(),
+});
+export type AgentLedgerSummary = z.infer<typeof AgentLedgerSummary>;
+
+/** GET /v1/admin/stats. agentFeesWeek covers the last 7 days and is mocked money. */
+export const AdminStats = z.object({
+  availableNow: z.number().int(),
+  engagedNow: z.number().int(),
+  jobsToday: z.number().int(),
+  agentFeesWeek: z.number().int(),
+});
+export type AdminStats = z.infer<typeof AdminStats>;
+
+export const AuthUser = z.object({
+  id: z.string(),
+  phone: z.string(),
+  name: z.string().nullable(),
+  role: Role,
+  workerId: z.string().nullable(), // WorkerProfile id, null until the worker has signed up
+  hasHirerProfile: z.boolean(),
+});
+export type AuthUser = z.infer<typeof AuthUser>;
+
+export const HirerCard = z.object({
+  id: z.string(), // User id
+  name: z.string(),
+  photoUrl: z.string().nullable(),
+  area: z.string().nullable(),
+  jobCount: z.number().int(),
+  rating: z.number(),
+  ratingCount: z.number().int(),
+  tags: z.array(z.object({ tag: z.string(), count: z.number().int() })),
+});
+export type HirerCard = z.infer<typeof HirerCard>;
 
 export const WorkerProfileDraft = z.object({
   name: z.string().nullable(),
@@ -103,6 +180,8 @@ export const ProblemAnalysis = z.object({
   urgency: Urgency,
   priceMin: z.number().int().nullable(),
   priceMax: z.number().int().nullable(),
+  /** Working days the customer asked for, null when they did not say. */
+  durationDays: z.number().int().nullable().optional(),
   summary: z.string(),
   confidence: z.number(),
   source: z.enum(["gemini", "jev_only"]),
@@ -113,6 +192,8 @@ export const Offer = z.object({
   id: z.string(),
   jobId: z.string(),
   worker: WorkerCard,
+  /** Set when a crew leader made this offer for the whole crew. */
+  crewId: z.string().nullable().optional(),
   price: z.number().int(),
   etaMinutes: z.number().int().nullable(),
   status: z.enum(["pending", "accepted", "rejected", "withdrawn"]),
@@ -136,8 +217,23 @@ export const JobCardData = z.object({
   addressArea: z.string(),
   time: z.string(),
   agreedPrice: z.number().int(),
+  /** "template" means Gemini was unavailable and the card was built from the job's own fields. */
+  source: z.enum(["gemini", "template"]).optional(),
+  skills: z.array(z.string()).optional(),
+  durationDays: z.number().int().optional(),
+  startDate: z.string().optional(), // YYYY-MM-DD
+  pricePerDay: z.number().int().optional(),
+  totalPrice: z.number().int().optional(),
 });
 export type JobCardData = z.infer<typeof JobCardData>;
+
+export const JobDay = z.object({
+  dayNumber: z.number().int(),
+  date: z.string(), // YYYY-MM-DD
+  status: z.enum(["scheduled", "completed", "skipped"]),
+  completedAt: z.string().nullable(),
+});
+export type JobDay = z.infer<typeof JobDay>;
 
 export const Job = z.object({
   id: z.string(),
@@ -164,6 +260,16 @@ export const Job = z.object({
   workerConfirmed: z.boolean(),
   createdAt: z.string(),
   completedAt: z.string().nullable(),
+  /**
+   * proposedPrice, agreedPrice and Offer.price are ALWAYS per day (for the whole crew on a crew job).
+   * The API always sends the fields below. They are optional only so existing fixtures keep compiling.
+   */
+  durationDays: z.number().int().optional(),
+  startDate: z.string().optional(), // YYYY-MM-DD
+  /** agreedPrice x durationDays once agreed. After an early finish, agreedPrice x completed days. */
+  totalPrice: z.number().int().nullable().optional(),
+  /** Empty until both sides confirm. */
+  days: z.array(JobDay).optional(),
 });
 export type Job = z.infer<typeof Job>;
 
@@ -196,6 +302,7 @@ export const Earning = z.object({
   amount: z.number().int(),
   categoryId: z.string(),
   earnedAt: z.string(),
+  dayNumber: z.number().int().nullable().optional(),
 });
 export type Earning = z.infer<typeof Earning>;
 
@@ -266,4 +373,51 @@ export type WsEvent = z.infer<typeof WsEvent>;
  *   GET /admin/workers   POST /admin/workers/:id/approve|suspend
  *   GET /admin/jobs      GET /admin/disputes   GET /admin/stats
  *   POST /admin/agents   {phone, name}
+ *
+ * Additions beyond the original list
+ *   GET  /healthz  (not under /v1)
+ *   GET  /areas                    Islamabad/Rawalpindi areas with coordinates
+ *   POST /uploads/image            multipart `image` -> {url}
+ *   PATCH /workers/me              typed edit of one or more fields
+ *   POST /customers                typed customer sign-up {name, area?, location?}
+ *   GET  /customers/:id            -> HirerCard
+ *   POST /jobs/:id/accept          worker takes a direct or crew request -> negotiating
+ *   POST /jobs/:id/decline         worker refuses a request
+ *   POST /jobs/:id/dispute         {reason}
+ *   GET  /jobs/:id/offers          -> {items: Offer[]}
+ *   GET  /admin/agents[?days=7]    -> {items: AgentLedgerSummary[]}
+ *   GET  /admin/agents/:id/ledger  -> {summary: AgentLedgerSummary, entries: AgentLedgerEntry[]}
+ *   GET  /settings/public          -> AppSettings (no sign-in needed)
+ *   GET  /admin/settings           -> AppSettings
+ *   PATCH /admin/settings          {agentSignupFee?, agentSharePercent?} -> AppSettings
+ *   POST /admin/disputes/:id/resolve {resolution}
+ *
+ * Response shapes
+ *   Lists return {items: [...]}. GET /workers also returns
+ *   detected: {categoryId, confidence, skills} | null, when `q` was given.
+ *   GET /me returns {user: AuthUser, worker: WorkerCard | null, hirer: HirerCard | null}.
+ *   GET /workers/:id returns WorkerCard plus reviews: Review[].
+ *
+ * Typed sign-up (no audio, no Gemini needed)
+ *   POST /workers {name, area, categoryIds? or trade (free text, Urdu/Roman/English), skills?,
+ *   years?, rate?, location?, workingHours?, cnic?, forPhone? (agents only)}.
+ *   An unrecognised trade returns 422 TRADE_NOT_RECOGNISED. Show the category picker then.
+ *   A signup with forPhone records one mock_collected ledger entry in the same transaction.
+ *   Self-signup is free and records nothing. A blocked or duplicate signup records nothing.
+ *   POST /workers/me/cnic accepts JSON {cnic} as well as a photo.
+ *
+ * Multi-day jobs (all modes)
+ *   POST /jobs also takes durationDays (1 to 30, default 1) and startDate (YYYY-MM-DD, today to
+ *   14 days ahead in Pakistan, default today). A worker is engaged from confirmation through
+ *   the last day, even if the job starts later.
+ *   POST /jobs/:id/days/:dayNumber/complete   assigned worker or crew leader, idempotent, pays that day.
+ *   POST /jobs/:id/complete   finishes early: remaining days are skipped and only completed days
+ *   are charged. 409 NO_DAYS_COMPLETED when none are done; cancel instead.
+ *   POST /jobs/:id/cancel returns 409 DAYS_ALREADY_COMPLETED once a day has been paid.
+ *
+ * Open crew jobs: POST /jobs {mode: "crew"} with no crewId is published for crews to bid on.
+ * A crew leader offers with POST /jobs/:id/offers {price, crewId}.
+ *
+ * Errors worth handling: 409 WORKER_NOT_AVAILABLE, 409 WORKER_ENGAGED, 422 BELOW_FLOOR,
+ * 409 CNIC_DUPLICATE, 503 AI_UNAVAILABLE (audio or image could not be processed).
  */
