@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Runs on the droplet as root. deploy.sh uploads and calls it; do not run it by hand.
+# Runs on the droplet as root, called through kaamwala-ctl; do not run it by hand.
 # Installs a release, runs migrations, and restarts only kaamwala-api.
 #
 # Arguments: <release id> <upload directory> <run seed: 0 or 1>

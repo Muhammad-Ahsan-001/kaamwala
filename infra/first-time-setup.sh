@@ -54,11 +54,11 @@ CADDY_SITE_FILE="$(dirname "$CADDY_MAIN_FILE")/kaamwala.caddy"
 IMPORT_LINE="import ${CADDY_SITE_FILE}"
 IMPORT_MARKER="# KaamWala site blocks (added by infra/first-time-setup.sh)"
 
-for cmd in caddy cmp curl install openssl psql sed ss sudo systemctl useradd; do
+for cmd in awk caddy cmp curl install openssl psql sed sha256sum ss sudo systemctl useradd visudo; do
   command -v "$cmd" >/dev/null 2>&1 || die "Required command not found: $cmd"
 done
 
-for file in kaamwala-api.service Caddyfile.kaamwala; do
+for file in kaamwala-api.service Caddyfile.kaamwala remote-activate.sh kaamwala-ctl; do
   [[ -f "${SCRIPT_DIR}/${file}" ]] || die "Missing ${SCRIPT_DIR}/${file}"
 done
 
@@ -235,11 +235,28 @@ else
   echo "Caddy already has the KaamWala site blocks."
 fi
 
+# ---------------------------------------------------------------------------
+# Deploy access: one fixed, root-owned command and nothing else
+# ---------------------------------------------------------------------------
+step "Installing the kaamwala-ctl deploy command"
+install -d -o root -g root -m 755 /usr/local/lib/kaamwala
+install -o root -g root -m 755 "${SCRIPT_DIR}/remote-activate.sh" /usr/local/lib/kaamwala/remote-activate.sh
+install -o root -g root -m 755 "${SCRIPT_DIR}/kaamwala-ctl" /usr/local/sbin/kaamwala-ctl
+
+DEPLOY_USER="${SUDO_USER:-}"
+if [[ -n "$DEPLOY_USER" && "$DEPLOY_USER" != "root" ]]; then
+  [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "Unexpected user name: $DEPLOY_USER"
+  SUDOERS_FILE="/etc/sudoers.d/kaamwala-deploy"
+  SUDOERS_TMP="$(mktemp)"
+  printf '# Installed by KaamWala first-time-setup.sh. Allows only this one command without a password.\n%s ALL=(root) NOPASSWD: /usr/local/sbin/kaamwala-ctl\n' "$DEPLOY_USER" >"$SUDOERS_TMP"
+  visudo -cqf "$SUDOERS_TMP" || die "The sudoers rule did not validate. Nothing was installed."
+  install -o root -g root -m 440 "$SUDOERS_TMP" "$SUDOERS_FILE"
+  rm -f "$SUDOERS_TMP"
+  if ! visudo -cq; then
+    rm -f "$SUDOERS_FILE"
+    die "The sudoers configuration did not validate with the new rule, so the rule was removed."
+  fi
+  echo "${DEPLOY_USER} can now run only /usr/local/sbin/kaamwala-ctl without a password."
+fi
+
 step "Setup complete"
-cat <<EOF
-
-Still to do on this server: add the API keys to ${ENV_FILE}
-  GEMINI_API_KEY, VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY
-
-Then, from your computer: bash deploy.sh --seed
-EOF

@@ -1,0 +1,69 @@
+import { Languages, MonitorSmartphone, Sun, Volume2, type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
+import { useSettings } from "../lib/settings";
+import { Card, Switch } from "../ui/primitives";
+import { LangPills, Screen } from "../ui/shell";
+
+function Row({ icon: Icon, title, body, control }: { icon: LucideIcon; title: string; body?: string; control: ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 px-3 py-2">
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand-100 text-brand-700">
+        <Icon className="h-6 w-6" aria-hidden />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-lg font-bold">{title}</div>
+        {body && <div className="text-sm text-soft">{body}</div>}
+      </div>
+      {control}
+    </div>
+  );
+}
+
+export function SettingsScreen() {
+  const { t, sunlight, setSunlight, audioCues, setAudioCues, keepAwake, setKeepAwake, wakeLockSupported } = useSettings();
+
+  return (
+    <Screen title={t("ترتیبات", "Settings", "Settings")} back>
+      <Card className="divide-y divide-line p-0">
+        <div className="px-3 py-3">
+          <div className="mb-2 flex items-center gap-3">
+            <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-brand-100 text-brand-700">
+              <Languages className="h-6 w-6" aria-hidden />
+            </span>
+            <div className="text-lg font-bold">{t("زبان", "Zaban", "Language")}</div>
+          </div>
+          <LangPills />
+        </div>
+
+        <Row
+          icon={Sun}
+          title={t("دھوپ کا موڈ", "Dhoop mode", "Sunlight mode")}
+          body={t("تیز رنگ اور بڑے حروف، دھوپ میں پڑھنے کے لیے", "Tez rang aur bare huroof, dhoop mein parhne ke liye", "Maximum contrast and larger text for outdoors")}
+          control={<Switch checked={sunlight} onChange={setSunlight} label={t("دھوپ کا موڈ", "Dhoop mode", "Sunlight mode")} />}
+        />
+
+        <Row
+          icon={MonitorSmartphone}
+          title={t("اسکرین جلتی رکھیں", "Screen jalti rakhein", "Keep screen awake")}
+          body={
+            wakeLockSupported
+              ? t("جب تک ایپ کھلی ہو، اسکرین بند نہیں ہو گی", "Jab tak app khuli ho, screen band nahi hogi", "Your screen stays on while the app is open")
+              : t("یہ براؤزر اس سہولت کو سپورٹ نہیں کرتا", "Ye browser is sahulat ko support nahi karta", "This browser does not support this feature")
+          }
+          control={<Switch checked={keepAwake && wakeLockSupported} disabled={!wakeLockSupported} onChange={setKeepAwake} label={t("اسکرین جلتی رکھیں", "Screen jalti rakhein", "Keep screen awake")} />}
+        />
+
+        <Row
+          icon={Volume2}
+          title={t("آواز کے اشارے", "Awaz ke ishare", "Audio cues")}
+          body={t("بٹن دبانے پر آواز سنیں", "Button dabane par awaz sunein", "Hear a sound when you tap key buttons")}
+          control={<Switch checked={audioCues} onChange={setAudioCues} label={t("آواز کے اشارے", "Awaz ke ishare", "Audio cues")} />}
+        />
+      </Card>
+
+      <p className="mt-3 text-center text-sm text-soft">
+        {t("براؤزر فون کی روشنی خود نہیں بدل سکتا۔ روشنی فون کی سیٹنگ سے بڑھائیں۔", "Browser phone ki roshni khud nahi badal sakta. Roshni phone ki setting se barhayein.", "Browsers cannot change your phone's brightness. Use your phone's own brightness control.")}
+      </p>
+    </Screen>
+  );
+}

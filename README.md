@@ -82,9 +82,9 @@ Other useful commands:
 KaamWala runs on a DigitalOcean droplet next to other apps, at `kaamwala.avezea.com` (web) and `api.kaamwala.avezea.com` (API). The scripts add only KaamWala's own Postgres database, its `kaamwala-api` systemd service on private port 3002, and its Caddy site blocks. Nothing else on the server is changed or restarted.
 
 1. In Namecheap's Advanced DNS for `avezea.com`, add A records for `kaamwala` and `api.kaamwala` pointing to the droplet's IP.
-2. Copy `infra/deploy.env.example` to `infra/deploy.env` and set the droplet host, SSH user and domain. SSH must work with a key, as root or a passwordless-sudo user.
-3. Run `bash deploy.sh --setup` once.
-4. On the droplet, add `GEMINI_API_KEY`, `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` to `/etc/kaamwala/api.env`.
+2. Copy `infra/deploy.env.example` to `infra/deploy.env` and set the droplet host, SSH user and domain. SSH must work with a key.
+3. Run `bash deploy.sh --setup`, then run the single `ssh -t` command it prints. That command asks for the sudo password once in your terminal. Afterwards the deploy user can run only `/usr/local/sbin/kaamwala-ctl` without a password.
+4. Run `bash deploy.sh --push-env` to copy the Gemini and push keys from `apps/api/.env` to the server.
 5. Run `bash deploy.sh --seed` for the first deploy, and `bash deploy.sh` after that.
 
 ## Tech stack
@@ -159,7 +159,6 @@ Thanks to the authors of these projects. All project-specific code in this repos
 | [React](https://react.dev) and React DOM | MIT |
 | [React Router](https://reactrouter.com) | MIT |
 | [Leaflet](https://leafletjs.com) | BSD-2-Clause |
-| [React Leaflet](https://react-leaflet.js.org) | Hippocratic-2.1 |
 | [Driver.js](https://driverjs.com) | MIT |
 | [idb](https://github.com/jakearchibald/idb) | ISC |
 | [browser-image-compression](https://github.com/Donaldcwl/browser-image-compression) | MIT |

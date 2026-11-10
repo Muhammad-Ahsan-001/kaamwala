@@ -1,0 +1,252 @@
+@import "@fontsource/noto-nastaliq-urdu/arabic-400.css";
+@import "@fontsource/noto-nastaliq-urdu/arabic-700.css";
+@import "@fontsource-variable/plus-jakarta-sans/index.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light only;
+
+    --page: 250 247 240; /* warm paper #FAF7F0 */
+    --surface: 255 255 255;
+    --sunken: 241 236 225;
+    --line: 233 226 212;
+    --ink: 30 43 37;
+    --soft: 100 108 98;
+    --faint: 143 148 136;
+
+    --brand-50: 236 246 241;
+    --brand-100: 218 238 229;
+    --brand-200: 178 219 201;
+    --brand-500: 27 143 104;
+    --brand-600: 19 122 87; /* trust green #137A57 */
+    --brand-700: 15 99 71;
+    --brand-800: 11 77 55;
+
+    --amber-50: 254 247 230;
+    --amber-100: 253 236 200;
+    --amber-400: 242 167 27; /* roshan amber #F2A71B */
+    --amber-500: 224 149 14;
+    --amber-700: 150 94 4;
+    --amber-800: 112 70 3;
+
+    --busy-50: 252 238 238;
+    --busy-100: 249 219 219;
+    --busy-500: 214 69 69; /* busy red #D64545 */
+    --busy-600: 190 54 54;
+    --busy-700: 158 41 41;
+
+    /* No generic family here: Latin letters inside Urdu text must fall through to --latin. */
+    --urdu: "Noto Nastaliq Urdu", "Jameel Noori Nastaleeq", "Urdu Typesetting";
+    --latin: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+
+  /* Sunlight mode: maximum contrast and larger text for use outdoors. */
+  html[data-sunlight="on"] {
+    --page: 255 255 255;
+    --sunken: 240 240 232;
+    --line: 70 80 72;
+    --ink: 6 14 10;
+    --soft: 24 34 28;
+    --faint: 48 58 50;
+    --brand-600: 8 92 62;
+    --brand-700: 6 74 50;
+    --amber-700: 112 66 0;
+    --busy-500: 176 30 30;
+    --busy-600: 150 24 24;
+    --busy-700: 120 18 18;
+  }
+
+  html {
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    font-family: var(--latin);
+  }
+
+  html[lang="ur"] {
+    font-size: 16.5px;
+    /* Nastaliq descends far below the baseline; this keeps lines from colliding. */
+    line-height: 2.15;
+    font-family: var(--urdu), var(--latin);
+  }
+
+  html[data-sunlight="on"] {
+    font-size: 18.5px;
+    font-weight: 600;
+  }
+
+  body {
+    @apply bg-page text-ink antialiased;
+    margin: 0;
+    min-width: 320px;
+    overflow-x: hidden;
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button {
+    touch-action: manipulation;
+  }
+
+  input,
+  textarea {
+    line-height: inherit;
+  }
+
+  :focus-visible {
+    outline: 3px solid rgb(var(--brand-500));
+    outline-offset: 2px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-weight: 700;
+    margin: 0;
+  }
+
+  html:not([lang="ur"]) h1,
+  html:not([lang="ur"]) h2 {
+    letter-spacing: -0.015em;
+  }
+
+  p {
+    margin: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* Numbers, phone numbers, sector codes and Roman Urdu inside Urdu screens. */
+  .latin {
+    font-family: var(--latin);
+    line-height: 1.5;
+    unicode-bidi: isolate;
+  }
+
+  /* Urdu shown in every language, such as the headings on worker screens. */
+  .ur {
+    font-family: var(--urdu), var(--latin);
+    line-height: 2.15;
+  }
+
+  .admin-root {
+    font-family: var(--latin);
+    line-height: 1.5;
+  }
+
+  .field {
+    @apply block min-h-14 w-full rounded-2xl border border-line bg-surface px-4 py-2 text-lg text-ink transition-colors placeholder:text-faint focus:border-brand-500 focus:outline-none;
+  }
+
+  .scroll-x {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scroll-x::-webkit-scrollbar {
+    display: none;
+  }
+
+  .skeleton {
+    background: linear-gradient(90deg, rgb(var(--sunken)) 25%, rgb(var(--surface)) 50%, rgb(var(--sunken)) 75%);
+    background-size: 200% 100%;
+    @apply animate-shimmer rounded-2xl;
+  }
+
+  .map-pin {
+    background: transparent;
+    border: 0;
+  }
+}
+
+html {
+  --page-dir: 1;
+}
+html[dir="rtl"] {
+  --page-dir: -1;
+}
+
+/* List items arrive one after another, but only the first few, so long lists stay quick. */
+.stagger > * {
+  animation: rise 0.28s ease-out backwards;
+}
+.stagger > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+.stagger > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+.stagger > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+.stagger > *:nth-child(n + 5) {
+  animation-delay: 160ms;
+}
+
+/* Focus stays visible on coloured surfaces too. */
+.on-color :focus-visible {
+  outline-color: #fff;
+}
+
+/* Available workers breathe on the map. Compositor-only, so cheap phones keep up. */
+.map-pulse {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 9999px;
+  background: rgb(var(--brand-500) / 0.45);
+  animation: ring 2.2s ease-out infinite;
+}
+
+/* The big status switch: a thumb with a little spring in it. */
+.status-thumb {
+  transition: transform 0.34s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Mixed-script boxes keep the page's alignment even when the text typed is Latin. */
+html[dir="rtl"] .field[dir="auto"] {
+  text-align: right;
+}
+html[dir="ltr"] .field[dir="auto"] {
+  text-align: left;
+}
+
+/* "Forward" arrows are drawn pointing left for Urdu and flip for other languages. */
+html[dir="ltr"] .lucide-arrow-left {
+  transform: rotate(180deg);
+}
+
+/* Leaflet draws in LTR regardless of the page direction. */
+.leaflet-container {
+  font-family: var(--latin);
+  background: rgb(var(--sunken));
+  z-index: 0;
+}
+/* Warm the standard map tiles so they sit with the paper palette. */
+.leaflet-tile-pane {
+  filter: saturate(0.72) sepia(0.14) brightness(1.03);
+}
+.leaflet-control-attribution {
+  font-size: 10px;
+  line-height: 1.4;
+}

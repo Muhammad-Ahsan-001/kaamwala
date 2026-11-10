@@ -2,9 +2,10 @@
 #
 # KaamWala deploy. Run from Git Bash or any Linux/macOS shell:
 #
-#   bash deploy.sh --setup    one-time server setup (run this first, once)
-#   bash deploy.sh            build, upload, migrate, restart kaamwala-api
-#   bash deploy.sh --seed     same, and load the demo seed data as well
+#   bash deploy.sh --setup      prepare the one-time server setup (run this first, once)
+#   bash deploy.sh --push-env   copy the Gemini and push keys from apps/api/.env to the server
+#   bash deploy.sh              build, upload, migrate, restart kaamwala-api
+#   bash deploy.sh --seed       same, and load the demo seed data as well
 #
 # The droplet also hosts other production apps. This script only ever changes
 # kaamwala's own release directories and restarts only the kaamwala-api unit.
@@ -25,15 +26,17 @@ step() {
 }
 
 usage() {
-  sed -n '3,7p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '3,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 RUN_SETUP=0
 RUN_SEED=0
+RUN_PUSH_ENV=0
 for arg in "$@"; do
   case "$arg" in
     --setup) RUN_SETUP=1 ;;
     --seed) RUN_SEED=1 ;;
+    --push-env) RUN_PUSH_ENV=1 ;;
     -h | --help)
       usage
       exit 0
@@ -79,6 +82,7 @@ if [[ "$DROPLET_USER" == "root" ]]; then
 else
   REMOTE_SUDO="sudo -n"
 fi
+REMOTE_CTL="$REMOTE_SUDO /usr/local/sbin/kaamwala-ctl"
 
 WEB_HOST="kaamwala.${DOMAIN}"
 API_HOST="api.kaamwala.${DOMAIN}"
@@ -98,9 +102,6 @@ trap cleanup EXIT
 
 step "Checking SSH access to $TARGET"
 remote true || die "Cannot reach $TARGET over SSH with key authentication."
-if [[ -n "$REMOTE_SUDO" ]]; then
-  remote sudo -n true || die "$DROPLET_USER needs passwordless sudo on the droplet."
-fi
 
 # ---------------------------------------------------------------------------
 # One-time server setup
@@ -109,17 +110,51 @@ if [[ "$RUN_SETUP" -eq 1 ]]; then
   [[ "$RUN_SEED" -eq 0 ]] || die "Use --setup on its own, then deploy with --seed afterwards."
 
   step "Uploading setup files"
-  REMOTE_TMP="$(remote mktemp -d /tmp/kaamwala-setup.XXXXXX)"
-  tar -czf - -C infra first-time-setup.sh kaamwala-api.service Caddyfile.kaamwala |
-    remote tar -xzf - --no-same-owner -C "$REMOTE_TMP"
+  SETUP_DIR="kaamwala-setup"
+  remote "rm -rf '$SETUP_DIR' && mkdir -m 700 '$SETUP_DIR'"
+  tar -czf - -C infra first-time-setup.sh remote-activate.sh kaamwala-ctl kaamwala-api.service Caddyfile.kaamwala |
+    remote tar -xzf - --no-same-owner -C "$SETUP_DIR"
 
-  step "Running first-time setup on the droplet"
-  remote "$REMOTE_SUDO env DOMAIN='$DOMAIN' CADDY_MAIN_FILE='$CADDY_MAIN_FILE' bash '$REMOTE_TMP/first-time-setup.sh'"
-
-  echo
-  echo "Setup finished. Next: add the API keys to /etc/kaamwala/api.env on the droplet, then run: bash deploy.sh --seed"
+  SETUP_CMD="env DOMAIN=$DOMAIN CADDY_MAIN_FILE=$CADDY_MAIN_FILE bash $SETUP_DIR/first-time-setup.sh"
+  if [[ "$DROPLET_USER" == "root" ]]; then
+    step "Running first-time setup on the droplet"
+    remote "$SETUP_CMD"
+    echo
+    echo "Setup finished. Next: bash deploy.sh --push-env, then bash deploy.sh --seed"
+  else
+    PORT_FLAG=""
+    if [[ "$SSH_PORT" != "22" ]]; then
+      PORT_FLAG="-p $SSH_PORT "
+    fi
+    echo
+    echo "The setup files are on the droplet. Finish by running this once in a terminal."
+    echo "It asks for the sudo password there, so the password is never stored or shared:"
+    echo
+    echo "  ssh -t ${PORT_FLAG}${TARGET} \"sudo $SETUP_CMD\""
+  fi
   exit 0
 fi
+
+# ---------------------------------------------------------------------------
+# Copy API keys to the server
+# ---------------------------------------------------------------------------
+if [[ "$RUN_PUSH_ENV" -eq 1 ]]; then
+  [[ "$RUN_SEED" -eq 0 ]] || die "Use --push-env on its own."
+  [[ -f apps/api/.env ]] || die "Missing apps/api/.env"
+  step "Copying the Gemini and push keys to the droplet"
+  tr -d '\r' <apps/api/.env |
+    grep -E '^(GEMINI_API_KEY|GEMINI_MODEL|GEMINI_FALLBACK_MODELS|VAPID_PUBLIC_KEY|VAPID_PRIVATE_KEY)=' |
+    remote "$REMOTE_CTL set-env"
+  echo "Done. The values were not printed."
+  exit 0
+fi
+
+step "Checking the droplet is set up"
+INSTALLED_SHA="$(remote "$REMOTE_CTL activate-sha")" ||
+  die "The one-time setup has not been done. Run: bash deploy.sh --setup"
+LOCAL_SHA="$(tr -d '\r' <infra/remote-activate.sh | sha256sum | cut -d' ' -f1)"
+[[ "$INSTALLED_SHA" == "$LOCAL_SHA" ]] ||
+  die "infra/remote-activate.sh changed since the one-time setup. Run: bash deploy.sh --setup"
 
 # ---------------------------------------------------------------------------
 # Build locally
@@ -159,7 +194,6 @@ mkdir -p "$STAGE_DIR/api" "$STAGE_DIR/web"
 cp -R apps/api/dist "$STAGE_DIR/api/dist"
 cp -R apps/api/prisma "$STAGE_DIR/api/prisma"
 cp -R apps/web/dist/. "$STAGE_DIR/web/"
-cp infra/remote-activate.sh "$STAGE_DIR/remote-activate.sh"
 node infra/make-release-package.mjs "$STAGE_DIR/api/package.json"
 
 GIT_SHA="$(git rev-parse --short HEAD)"
@@ -178,7 +212,7 @@ REMOTE_TMP="$(remote mktemp -d /tmp/kaamwala-deploy.XXXXXX)"
 tar -czf - -C "$STAGE_DIR" . | remote tar -xzf - --no-same-owner -C "$REMOTE_TMP"
 
 step "Migrating and restarting kaamwala-api on the droplet"
-remote "$REMOTE_SUDO bash '$REMOTE_TMP/remote-activate.sh' '$RELEASE_ID' '$REMOTE_TMP' '$RUN_SEED'"
+remote "$REMOTE_CTL activate '$RELEASE_ID' '$REMOTE_TMP' '$RUN_SEED'"
 
 # ---------------------------------------------------------------------------
 # Check it from outside
