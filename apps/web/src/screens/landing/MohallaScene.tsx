@@ -1,9 +1,4 @@
-import { Mic } from "lucide-react";
 import type { CSSProperties } from "react";
-import type { Category } from "../../data";
-import { categoryName } from "../../data/labels";
-import { useSettings } from "../../lib/settings";
-import { CategoryIcon } from "../../ui/CategoryIcon";
 import { cx } from "../../ui/primitives";
 
 const ARCH = "M0 456V196C0 120 130 96 200 8C270 96 400 120 400 196V456Q400 480 376 480H24Q0 480 0 456Z";
@@ -46,9 +41,9 @@ function House({ x, w, h, fill, index }: { x: number; w: number; h: number; fill
 }
 
 /** A drawn impression of a mohalla under the Margallas. It holds no people, prices or counts. */
-function Scene() {
+export function MohallaScene({ className }: { className?: string }) {
   return (
-    <svg viewBox="-16 -18 432 514" className="relative mx-auto block h-auto w-[60%] md:w-[80%] lg:w-[76%]" aria-hidden focusable="false">
+    <svg viewBox="-16 -18 432 514" className={cx("relative block h-auto", className)} aria-hidden focusable="false">
       <defs>
         <clipPath id="lp-arch">
           <path d={ARCH} />
@@ -98,58 +93,5 @@ function Scene() {
         </g>
       ))}
     </svg>
-  );
-}
-
-const BADGE_SPOTS: { side: "start" | "end"; top: string; delay: number }[] = [
-  { side: "start", top: "8%", delay: 420 },
-  { side: "end", top: "22%", delay: 520 },
-  { side: "start", top: "36%", delay: 620 },
-  { side: "end", top: "64%", delay: 720 },
-];
-
-/** The floating trades are whichever ones the API returns first. */
-export function HeroArt({ categories }: { categories: Category[] | null }) {
-  const { t, lang } = useSettings();
-  const shown = categories ?? [];
-
-  return (
-    <div className="relative mx-auto w-full max-w-[340px] pb-7 md:max-w-[460px] lg:max-w-[540px]" aria-hidden>
-      <div className="lp-glow pointer-events-none absolute -inset-8" />
-      <div className="lp-rise" style={{ "--d": "120ms" } as CSSProperties}>
-        <Scene />
-      </div>
-
-      {BADGE_SPOTS.map((spot, index) => {
-        const category = shown[index];
-        if (!category) return null;
-        return (
-          <div key={category.id} className="lp-pop absolute" style={{ top: spot.top, [spot.side === "start" ? "insetInlineStart" : "insetInlineEnd"]: 0, "--d": `${spot.delay}ms` } as CSSProperties}>
-            <div className="lp-float" style={{ "--d": `${index * 500}ms` } as CSSProperties}>
-              <div className={cx("flex h-12 w-12 items-center justify-center gap-2 rounded-2xl bg-surface shadow-lift lg:h-auto lg:w-auto lg:rounded-full lg:py-1.5 lg:pe-4 lg:ps-1.5")}>
-                <span className={cx("flex h-9 w-9 shrink-0 items-center justify-center rounded-xl lg:rounded-full", index % 2 === 0 ? "bg-brand-100 text-brand-700" : "bg-amber-100 text-amber-800")}>
-                  <CategoryIcon name={category.icon} className="h-5 w-5" />
-                </span>
-                <span className="hidden whitespace-nowrap text-sm font-bold lg:inline">{categoryName(category, lang)}</span>
-              </div>
-            </div>
-          </div>
-        );
-      })}
-
-      <div className="lp-pop absolute inset-x-0 bottom-0 flex justify-center lg:justify-start lg:px-2" style={{ "--d": "860ms" } as CSSProperties}>
-        <div className="flex items-center gap-2 rounded-full bg-surface py-1.5 pe-4 ps-1.5 shadow-lift">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-600 text-white">
-            <Mic className="h-[18px] w-[18px]" />
-          </span>
-          <span dir="ltr" className="flex h-5 items-center gap-[3px]">
-            {[0, 180, 90, 270, 40].map((delay) => (
-              <span key={delay} className="lp-bar h-full w-[3px] rounded-full bg-amber-400" style={{ "--d": `${delay}ms` } as CSSProperties} />
-            ))}
-          </span>
-          <span className="whitespace-nowrap text-sm font-semibold">{t("پنکھا نہیں چل رہا", "Pankha nahi chal raha", "My fan has stopped")}</span>
-        </div>
-      </div>
-    </div>
   );
 }

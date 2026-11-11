@@ -1,9 +1,8 @@
-/* The main website only: type, ornament and motion that utilities do not cover. */
+/* The main website only: type, ornament and motion that utilities do not cover.
+   Only transform and opacity animate, so a cheap phone keeps up. */
 
 .lp-root {
-  background:
-    radial-gradient(70rem 34rem at 50% -12rem, rgb(var(--amber-100)) 0%, transparent 72%),
-    rgb(var(--page));
+  background: rgb(var(--page));
   font-size: 0.875rem;
   overflow-x: clip;
   text-wrap: pretty;
@@ -20,34 +19,393 @@ html[lang="ur"] .lp-root {
   }
 }
 
+/* ---------- Type ---------- */
+
 .lp-h1 {
-  font-size: clamp(1.625rem, 1.1rem + 2vw, 2.75rem);
+  font-size: clamp(2.15rem, 1.1rem + 4.2vw, 4.4rem);
   font-weight: 800;
-  line-height: 1.14;
+  line-height: 1.04;
+  letter-spacing: -0.035em;
+}
+
+.lp-h1 > span {
   text-wrap: balance;
 }
 
 html[lang="ur"] .lp-h1 {
-  font-size: clamp(1.5rem, 1.05rem + 1.35vw, 2.25rem);
+  font-size: clamp(1.8rem, 1.15rem + 2.6vw, 3.15rem);
   font-weight: 700;
-  line-height: 1.95;
+  line-height: 1.9;
+  letter-spacing: 0;
 }
 
 .lp-h2 {
-  font-size: clamp(1.125rem, 1rem + 0.55vw, 1.5rem);
+  font-size: clamp(1.55rem, 1.05rem + 2vw, 2.75rem);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+
+html[lang="ur"] .lp-h2 {
+  font-size: clamp(1.3rem, 1rem + 1.25vw, 2.05rem);
+  font-weight: 700;
+  line-height: 1.95;
+  letter-spacing: 0;
+}
+
+.lp-h3 {
+  font-size: clamp(1.0625rem, 1rem + 0.35vw, 1.3rem);
   font-weight: 800;
   line-height: 1.3;
 }
 
-html[lang="ur"] .lp-h2 {
-  font-size: clamp(1.0625rem, 0.95rem + 0.5vw, 1.375rem);
+html[lang="ur"] .lp-h3 {
   font-weight: 700;
   line-height: 1.95;
 }
 
-.lp-mark {
-  color: rgb(var(--brand-600));
+.lp-eyebrow {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
+
+html[lang="ur"] .lp-eyebrow {
+  font-size: 0.875rem;
+  letter-spacing: 0;
+}
+
+/* ---------- Header ---------- */
+
+.lp-header {
+  transition:
+    background-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.lp-header[data-scrolled] {
+  background-color: rgb(var(--page) / 0.86);
+  -webkit-backdrop-filter: saturate(1.4) blur(14px);
+  backdrop-filter: saturate(1.4) blur(14px);
+  box-shadow:
+    0 1px 0 rgb(var(--line)),
+    0 10px 30px -18px rgb(60 50 30 / 0.3);
+}
+
+/* ---------- Hero ---------- */
+
+.lp-hero {
+  background:
+    radial-gradient(52rem 30rem at 78% 18%, rgb(var(--amber-100)) 0%, rgb(var(--amber-100) / 0) 70%),
+    radial-gradient(40rem 28rem at 0% 0%, rgb(var(--brand-50)) 0%, rgb(var(--brand-50) / 0) 70%),
+    rgb(var(--page));
+}
+
+html[dir="rtl"] .lp-hero {
+  background:
+    radial-gradient(52rem 30rem at 22% 18%, rgb(var(--amber-100)) 0%, rgb(var(--amber-100) / 0) 70%),
+    radial-gradient(40rem 28rem at 100% 0%, rgb(var(--brand-50)) 0%, rgb(var(--brand-50) / 0) 70%),
+    rgb(var(--page));
+}
+
+/* "Roshan": slow sun rays behind the phone. */
+.lp-rays {
+  background: repeating-conic-gradient(from 0deg, rgb(var(--amber-400) / 0.2) 0deg 5deg, transparent 5deg 15deg);
+  -webkit-mask-image: radial-gradient(closest-side, #000 28%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 28%, transparent 100%);
+  animation: lp-spin 90s linear infinite;
+}
+
+.lp-sun-disc {
+  background: radial-gradient(closest-side, #ffd56e 0%, rgb(242 167 27 / 0.75) 55%, rgb(242 167 27 / 0) 100%);
+  opacity: 0.7;
+}
+
+.lp-rotor {
+  display: inline-block;
+}
+
+.lp-word {
+  position: relative;
+  display: inline-block;
+  color: rgb(var(--brand-600));
+  animation: lp-word-in 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.lp-swoosh {
+  position: absolute;
+  inset-inline-start: -3%;
+  bottom: -0.1em;
+  width: 106%;
+  height: 0.3em;
+  overflow: visible;
+}
+
+html[lang="ur"] .lp-swoosh {
+  bottom: 0.12em;
+  height: 0.24em;
+}
+
+html[dir="rtl"] .lp-swoosh {
+  transform: scaleX(-1);
+}
+
+.lp-swoosh path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: lp-draw 0.7s 0.2s cubic-bezier(0.6, 0.1, 0.2, 1) forwards;
+}
+
+.lp-live {
+  position: relative;
+}
+
+.lp-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: inherit;
+  animation: lp-ping 1.8s ease-out infinite;
+}
+
+/* A light sweeping across the main button every few seconds. */
+.lp-shine {
+  position: relative;
+  overflow: hidden;
+}
+
+.lp-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgb(255 255 255 / 0.32) 50%, transparent 65%);
+  transform: translateX(-120%);
+  animation: lp-shine 5s ease-in-out 1.6s infinite;
+  pointer-events: none;
+}
+
+/* ---------- Phone ---------- */
+
+.lp-phone {
+  position: relative;
+  width: min(15.5rem, 70vw);
+  aspect-ratio: 9 / 18.6;
+  border-radius: 2.5rem;
+  padding: 0.5rem;
+  background: linear-gradient(150deg, #33463d 0%, #13241d 55%, #0b1813 100%);
+  box-shadow:
+    0 40px 70px -28px rgb(15 70 45 / 0.55),
+    0 18px 30px -18px rgb(60 50 30 / 0.4),
+    inset 0 0 0 1.5px rgb(255 255 255 / 0.1);
+}
+
+@media (min-width: 1024px) {
+  .lp-phone {
+    width: 18rem;
+  }
+}
+
+.lp-phone::before {
+  content: "";
+  position: absolute;
+  top: 0.95rem;
+  left: 50%;
+  z-index: 5;
+  width: 4.6rem;
+  height: 1.15rem;
+  border-radius: 1rem;
+  background: #0b1612;
+  transform: translateX(-50%);
+}
+
+.lp-screen {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 2rem;
+  background: rgb(var(--page));
+  cursor: pointer;
+  user-select: none;
+}
+
+.lp-progress {
+  transform-origin: left center;
+  animation: lp-progress var(--ms, 3600ms) linear both;
+}
+
+html[dir="rtl"] .lp-progress {
+  transform-origin: right center;
+}
+
+[data-paused] .lp-progress {
+  animation: none;
+}
+
+.lp-scene-in {
+  animation: lp-scene 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.lp-pop-in {
+  animation: lp-pop 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  animation-delay: var(--d, 0ms);
+}
+
+.lp-type {
+  display: inline-block;
+  animation: lp-type 1.5s steps(16, end) 0.45s both;
+}
+
+html[dir="rtl"] .lp-type {
+  animation-name: lp-type-rtl;
+}
+
+.lp-mic-ring {
+  animation: lp-mic 1.8s ease-out infinite;
+  animation-delay: var(--d, 0ms);
+}
+
+.lp-dot {
+  animation: lp-dot 1s ease-in-out infinite;
+  animation-delay: var(--d, 0ms);
+}
+
+.lp-mpin {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: lp-drop 0.55s cubic-bezier(0.3, 1.4, 0.5, 1) backwards;
+  animation-delay: var(--d, 0ms);
+}
+
+.lp-radar-sm {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lp-radar-sm 2.4s ease-out infinite;
+}
+
+.lp-sheet-up {
+  animation: lp-sheet-up 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) 0.7s backwards;
+}
+
+.lp-check {
+  animation: lp-pop 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) 0.25s backwards;
+}
+
+.lp-burst {
+  opacity: 0;
+  animation: lp-burst 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) 0.45s forwards;
+}
+
+/* ---------- Trades ribbon ---------- */
+
+.lp-ribbon-mask {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+}
+
+.lp-marquee {
+  animation: lp-marquee var(--dur, 40s) linear infinite;
+}
+
+html[dir="rtl"] .lp-marquee {
+  animation-name: lp-marquee-rtl;
+}
+
+.lp-ribbon:hover .lp-marquee,
+.lp-ribbon:focus-within .lp-marquee {
+  animation-play-state: paused;
+}
+
+/* ---------- Try it ---------- */
+
+.lp-try {
+  background:
+    radial-gradient(38rem 24rem at 100% 0%, rgb(var(--amber-100) / 0.7) 0%, transparent 70%),
+    radial-gradient(34rem 26rem at 0% 100%, rgb(var(--brand-50)) 0%, transparent 70%);
+}
+
+.lp-maplabel {
+  paint-order: stroke;
+  stroke: #f6f1e6;
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.lp-radar {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  animation: lp-radar 4.4s ease-out infinite;
+  animation-delay: var(--d, 0ms);
+}
+
+.lp-wpin-in {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lp-drop 0.5s cubic-bezier(0.3, 1.4, 0.5, 1) backwards;
+  animation-delay: var(--d, 0ms);
+}
+
+.lp-wpin {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    opacity 0.35s ease,
+    transform 0.4s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+
+.lp-wpin[data-hot] {
+  transform: scale(1.3);
+}
+
+.lp-wpin[data-dim] {
+  opacity: 0.2;
+  transform: scale(0.75);
+}
+
+.lp-ping {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lp-ping 1.6s ease-out infinite;
+}
+
+/* ---------- How it works ---------- */
+
+.lp-road {
+  height: 0;
+  border-top: 3px dashed rgb(var(--amber-400) / 0.65);
+}
+
+.lp-road-v {
+  width: 0;
+  border-inline-start: 3px dashed rgb(var(--amber-400) / 0.65);
+}
+
+.lp-medal {
+  box-shadow:
+    0 0 0 5px rgb(var(--page)),
+    0 0 0 7px rgb(var(--amber-400) / 0.45),
+    0 12px 24px -10px rgb(150 94 4 / 0.55);
+}
+
+.lp-card {
+  transition:
+    transform 0.2s ease-out,
+    box-shadow 0.2s ease-out,
+    border-color 0.2s ease-out;
+}
+
+@media (hover: hover) {
+  .lp-card:hover {
+    transform: translateY(-4px);
+    border-color: rgb(var(--brand-200));
+    box-shadow: 0 16px 34px -14px rgb(60 50 30 / 0.22);
+  }
+}
+
+/* ---------- Ornament ---------- */
 
 /* The painted border strip from the sides of a Pakistani truck. */
 .lp-patti {
@@ -58,15 +416,19 @@ html[lang="ur"] .lp-h2 {
   background-position: center top;
 }
 
-/* A carved window screen, faint behind the worker panel. */
-.lp-jaali {
-  background-color: rgb(var(--brand-600));
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56' fill='none' stroke='%23fff' stroke-opacity='.13' stroke-width='1.4'%3E%3Cpath d='M28 4l24 24-24 24L4 28z'/%3E%3Cpath d='M11 11h34v34H11z'/%3E%3Cpath d='M0 0l11 11M56 0L45 11M0 56l11-11M56 56L45 45'/%3E%3C/svg%3E");
-  background-size: 56px 56px;
+.lp-ribbon .lp-patti {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='9'%3E%3Crect width='44' height='9' fill='%23FAF7F0'/%3E%3Cpath d='M0 0h11L5.5 9z' fill='%23F2A71B'/%3E%3Cpath d='M11 0h11l-5.5 9z' fill='%230F6347'/%3E%3Cpath d='M22 0h11l-5.5 9z' fill='%23965E04'/%3E%3Cpath d='M33 0h11l-5.5 9z' fill='%230F6347'/%3E%3C/svg%3E");
 }
 
-.lp-glow {
-  background: radial-gradient(closest-side, rgb(var(--amber-100)) 0%, rgb(var(--amber-100) / 0) 100%);
+/* A carved window screen, faint behind the green panels. */
+.lp-jaali {
+  background-color: rgb(var(--brand-600));
+  background-image:
+    radial-gradient(40rem 22rem at 0% 0%, rgb(255 255 255 / 0.08), transparent 70%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56' fill='none' stroke='%23fff' stroke-opacity='.12' stroke-width='1.4'%3E%3Cpath d='M28 4l24 24-24 24L4 28z'/%3E%3Cpath d='M11 11h34v34H11z'/%3E%3Cpath d='M0 0l11 11M56 0L45 11M0 56l11-11M56 56L45 45'/%3E%3C/svg%3E");
+  background-size:
+    auto,
+    56px 56px;
 }
 
 .lp-tile {
@@ -79,8 +441,7 @@ html[lang="ur"] .lp-h2 {
 @media (hover: hover) {
   .lp-tile:hover {
     transform: translateY(-3px);
-    border-color: rgb(var(--brand-200));
-    box-shadow: 0 10px 28px rgb(60 50 30 / 0.1);
+    box-shadow: 0 12px 28px -8px rgb(60 50 30 / 0.28);
   }
 }
 
@@ -88,11 +449,60 @@ html[lang="ur"] .lp-h2 {
   transform: scale(0.97);
 }
 
-/* Only transform and opacity move, so a cheap phone keeps up. */
+/* ---------- Entrances ---------- */
+
+.lp-rise {
+  animation: lp-rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  animation-delay: var(--d, 0ms);
+}
+
+/* Rises in once its section scrolls into view. */
+.lp-in {
+  opacity: 0;
+  transform: translateY(26px);
+  transition:
+    opacity 0.75s cubic-bezier(0.2, 0.7, 0.2, 1),
+    transform 0.75s cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition-delay: var(--d, 0ms);
+}
+
+[data-shown] .lp-in,
+.lp-in[data-shown] {
+  opacity: 1;
+  transform: none;
+}
+
+/* The mohalla drawing's own motion. */
+.lp-sun {
+  animation: lp-glow-sun 3.6s ease-in-out infinite alternate;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.lp-ring {
+  animation: lp-ring 2.6s ease-out infinite;
+  animation-delay: var(--d, 0ms);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.lp-pin {
+  animation: lp-bob 2.1s ease-in-out infinite alternate;
+  animation-delay: var(--d, 0ms);
+}
+
+.lp-bar {
+  animation: lp-bar 0.95s ease-in-out infinite;
+  animation-delay: var(--d, 0ms);
+  transform-origin: center;
+}
+
+/* ---------- Keyframes ---------- */
+
 @keyframes lp-rise {
   from {
     opacity: 0;
-    transform: translateY(14px);
+    transform: translateY(16px);
   }
   to {
     opacity: 1;
@@ -115,12 +525,179 @@ html[lang="ur"] .lp-h2 {
   }
 }
 
-@keyframes lp-float {
+@keyframes lp-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes lp-word-in {
   from {
-    transform: translateY(-5px);
+    opacity: 0;
+    transform: translateY(0.4em);
   }
   to {
-    transform: translateY(5px);
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lp-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes lp-ping {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+@keyframes lp-shine {
+  0%,
+  62% {
+    transform: translateX(-120%);
+  }
+  88%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes lp-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes lp-scene {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lp-type {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes lp-type-rtl {
+  from {
+    clip-path: inset(0 0 0 100%);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes lp-mic {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.85);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+@keyframes lp-dot {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes lp-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.4);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lp-radar-sm {
+  from {
+    opacity: 0.9;
+    transform: scale(0.4);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+@keyframes lp-radar {
+  0% {
+    opacity: 0.45;
+    transform: scale(0.3);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(8);
+  }
+}
+
+@keyframes lp-sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(110%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes lp-burst {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.3);
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--x), var(--y)) scale(1);
+  }
+}
+
+@keyframes lp-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes lp-marquee-rtl {
+  to {
+    transform: translateX(50%);
   }
 }
 
@@ -165,57 +742,58 @@ html[lang="ur"] .lp-h2 {
   }
 }
 
-.lp-rise {
-  animation: lp-rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
-  animation-delay: var(--d, 0ms);
-}
-
-.lp-pop {
-  animation: lp-pop 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
-  animation-delay: var(--d, 0ms);
-}
-
-.lp-float {
-  animation: lp-float 3.4s ease-in-out infinite alternate;
-  animation-delay: var(--d, 0ms);
-}
-
-.lp-pin {
-  animation: lp-bob 2.1s ease-in-out infinite alternate;
-  animation-delay: var(--d, 0ms);
-}
-
-.lp-ring {
-  animation: lp-ring 2.6s ease-out infinite;
-  animation-delay: var(--d, 0ms);
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.lp-sun {
-  animation: lp-glow-sun 3.6s ease-in-out infinite alternate;
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.lp-bar {
-  animation: lp-bar 0.95s ease-in-out infinite;
-  animation-delay: var(--d, 0ms);
-  transform-origin: center;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .lp-rise,
-  .lp-pop,
-  .lp-float,
-  .lp-pin,
-  .lp-ring,
+  .lp-rays,
+  .lp-word,
+  .lp-swoosh path,
+  .lp-live::after,
+  .lp-shine::after,
+  .lp-scene-in,
+  .lp-pop-in,
+  .lp-type,
+  .lp-mic-ring,
+  .lp-dot,
+  .lp-mpin,
+  .lp-radar-sm,
+  .lp-sheet-up,
+  .lp-check,
+  .lp-marquee,
+  .lp-radar,
+  .lp-wpin-in,
+  .lp-ping,
   .lp-sun,
+  .lp-ring,
+  .lp-pin,
   .lp-bar {
     animation: none !important;
   }
 
-  .lp-tile {
+  .lp-swoosh path {
+    stroke-dashoffset: 0;
+  }
+
+  .lp-burst,
+  .lp-radar {
+    display: none;
+  }
+
+  .lp-in {
+    opacity: 1;
+    transform: none;
     transition: none;
+  }
+
+  .lp-tile,
+  .lp-card,
+  .lp-wpin {
+    transition: none;
+  }
+
+  /* With no motion, the ribbon becomes a row the visitor scrolls. */
+  .lp-ribbon-mask {
+    overflow-x: auto;
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 }
